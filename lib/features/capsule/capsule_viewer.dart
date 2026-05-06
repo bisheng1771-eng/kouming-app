@@ -46,59 +46,48 @@ class CapsuleTimeline extends StatelessWidget {
       );
     }
 
-    final waiting = capsules
-        .where((c) => c.status == CapsuleStatus.waiting && c.daysLeft > 0)
-        .toList();
-    final ready = capsules
-        .where((c) => c.status == CapsuleStatus.waiting && c.daysLeft <= 0)
-        .toList();
-    final fulfilled = capsules
-        .where((c) => c.status == CapsuleStatus.fulfilled)
-        .toList();
+    // 只显示未还愿的愿望，按剩余时间排序（快到期的在前）
+    final active = capsules
+        .where((c) => c.status == CapsuleStatus.waiting)
+        .toList()
+      ..sort((a, b) => a.daysLeft.compareTo(b.daysLeft));
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (ready.isNotEmpty) ...[
-            _sectionHeader('\u{1F52E} ${I18n.t('capsule_title')}', KouMingTheme.gold),
-            const SizedBox(height: 4),
-            Text(I18n.t('pool_light_meaning'),
-                style: TextStyle(
-                  fontSize: 9,
-                  color: KouMingTheme.purple.withValues(alpha: 0.7),
-                  fontStyle: FontStyle.italic,
+          // 大标题
+          Row(
+            children: [
+              Container(
+                width: 3,
+                height: 18,
+                decoration: BoxDecoration(
+                  color: KouMingTheme.gold,
+                  borderRadius: BorderRadius.circular(2),
                 )),
-            const SizedBox(height: 8),
-            ...ready.map((c) => _CapsuleCard(
-                  capsule: c,
-                  isReady: true,
-                  onFulfill: onFulfill,
-                )),
-            const SizedBox(height: 16),
-          ],
-
-          if (waiting.isNotEmpty) ...[
-            _sectionHeader('\u23F3 ${I18n.t('capsule_title')}', KouMingTheme.purple),
-            const SizedBox(height: 8),
-            ...waiting.map((c) => _CapsuleCard(
-                  capsule: c,
-                  isReady: false,
-                  onFulfill: onFulfill,
-                )),
-            const SizedBox(height: 16),
-          ],
-
-          if (fulfilled.isNotEmpty) ...[
-            _sectionHeader('\u2728 ${I18n.t('capsule_fulfilled')}', KouMingTheme.spirit),
-            const SizedBox(height: 8),
-            ...fulfilled.map((c) => _CapsuleCard(
-                  capsule: c,
-                  isReady: false,
-                  onFulfill: onFulfill,
-                )),
-          ],
+              const SizedBox(width: 8),
+              Text(I18n.t('capsule_title'),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: KouMingTheme.gold,
+                  )),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text('记录你的心愿，到期后可还愿获得祝福值',
+              style: TextStyle(
+                fontSize: 10,
+                color: KouMingTheme.dim.withValues(alpha: 0.8),
+                fontStyle: FontStyle.italic,
+              )),
+          const SizedBox(height: 12),
+          ...active.map((c) => _CapsuleCard(
+                capsule: c,
+                onFulfill: onFulfill,
+              )),
         ],
       ),
     );
@@ -128,12 +117,10 @@ class CapsuleTimeline extends StatelessWidget {
 
 class _CapsuleCard extends StatefulWidget {
   final WishCapsule capsule;
-  final bool isReady;
   final void Function(WishCapsule) onFulfill;
 
   const _CapsuleCard({
     required this.capsule,
-    required this.isReady,
     required this.onFulfill,
   });
 
@@ -198,7 +185,7 @@ class _CapsuleCardState extends State<_CapsuleCard>
   @override
   Widget build(BuildContext context) {
     final c = widget.capsule;
-    final isFulfilled = c.status == CapsuleStatus.fulfilled;
+    final isReady = c.daysLeft <= 0;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -207,13 +194,11 @@ class _CapsuleCardState extends State<_CapsuleCard>
         color: KouMingTheme.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: widget.isReady
+          color: isReady
               ? KouMingTheme.gold.withValues(alpha: 0.4)
-              : isFulfilled
-                  ? KouMingTheme.spirit.withValues(alpha: 0.2)
-                  : _categoryColor.withValues(alpha: 0.12),
+              : _categoryColor.withValues(alpha: 0.12),
         ),
-        boxShadow: widget.isReady
+        boxShadow: isReady
             ? [BoxShadow(color: KouMingTheme.gold.withValues(alpha: 0.15), blurRadius: 12, spreadRadius: 2)]
             : null,
       ),
@@ -225,33 +210,29 @@ class _CapsuleCardState extends State<_CapsuleCard>
             child: Stack(
               alignment: Alignment.center,
               children: [
-                if (!isFulfilled)
-                  AnimatedBuilder(
-                    animation: _pulseCtrl,
-                    builder: (_, __) => CustomPaint(
-                      size: const Size(60, 60),
-                      painter: _ProgressRingPainter(
-                        progress: _progress,
-                        color: _categoryColor,
-                        isReady: widget.isReady,
-                        pulse: widget.isReady ? _pulseCtrl.value : 0,
-                      ),
+                AnimatedBuilder(
+                  animation: _pulseCtrl,
+                  builder: (_, __) => CustomPaint(
+                    size: const Size(60, 60),
+                    painter: _ProgressRingPainter(
+                      progress: _progress,
+                      color: _categoryColor,
+                      isReady: isReady,
+                      pulse: isReady ? _pulseCtrl.value : 0,
                     ),
                   ),
-                if (isFulfilled)
-                  const Text('\u2728', style: TextStyle(fontSize: 28))
-                else
-                  AnimatedBuilder(
-                    animation: _shimmerCtrl,
-                    builder: (_, __) => CustomPaint(
-                      size: const Size(36, 36),
-                      painter: _CapsuleOrbPainter(
-                        color: _categoryColor,
-                        isReady: widget.isReady,
-                        shimmer: _shimmerCtrl.value,
-                      ),
+                ),
+                AnimatedBuilder(
+                  animation: _shimmerCtrl,
+                  builder: (_, __) => CustomPaint(
+                    size: const Size(36, 36),
+                    painter: _CapsuleOrbPainter(
+                      color: _categoryColor,
+                      isReady: isReady,
+                      shimmer: _shimmerCtrl.value,
                     ),
                   ),
+                ),
               ],
             ),
           ),
@@ -266,10 +247,9 @@ class _CapsuleCardState extends State<_CapsuleCard>
                     const SizedBox(width: 4),
                     Expanded(
                       child: Text(c.wishText,
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontSize: 12,
-                            color: isFulfilled ? KouMingTheme.spirit : KouMingTheme.text,
-                            decoration: isFulfilled ? TextDecoration.lineThrough : null,
+                            color: KouMingTheme.text,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis),
@@ -277,97 +257,264 @@ class _CapsuleCardState extends State<_CapsuleCard>
                   ],
                 ),
                 const SizedBox(height: 4),
-                if (isFulfilled)
-                  Text(I18n.t('capsule_fulfilled'),
-                      style: const TextStyle(fontSize: 10, color: KouMingTheme.spirit))
-                else if (widget.isReady)
-                  Text(I18n.t('capsule_fulfill_success'),
-                      style: const TextStyle(fontSize: 10, color: KouMingTheme.gold, fontWeight: FontWeight.w600))
+                if (isReady)
+                  const Text('已到期，可以还愿了',
+                      style: TextStyle(fontSize: 10, color: KouMingTheme.gold, fontWeight: FontWeight.w600))
                 else
-                  Text(I18n.t('capsule_days_left', args: {'days': '${c.daysLeft}'}),
-                      style: const TextStyle(fontSize: 10, color: KouMingTheme.dim)),
-                const SizedBox(height: 6),
-                if (!isFulfilled)
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(3),
-                    child: LinearProgressIndicator(
-                      value: _progress,
-                      backgroundColor: _categoryColor.withValues(alpha: 0.1),
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        widget.isReady ? KouMingTheme.gold : _categoryColor,
+                  Row(
+                    children: [
+                      Text('剩余 ${c.daysLeft} 天',
+                          style: const TextStyle(fontSize: 10, color: KouMingTheme.dim)),
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: () => _showBlessingsDialog(context),
+                        child: Text('\u{1F48C} ${c.blessingCount} 祝福',
+                            style: const TextStyle(fontSize: 10, color: KouMingTheme.lantern)),
                       ),
-                      minHeight: 3,
-                    ),
+                    ],
                   ),
+                const SizedBox(height: 6),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(3),
+                  child: LinearProgressIndicator(
+                    value: _progress,
+                    backgroundColor: _categoryColor.withValues(alpha: 0.1),
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      isReady ? KouMingTheme.gold : _categoryColor,
+                    ),
+                    minHeight: 3,
+                  ),
+                ),
               ],
             ),
           ),
-          // Action buttons
-          if (widget.isReady && !isFulfilled)
-            Padding(
-              padding: const EdgeInsets.only(left: 8),
-              child: _OpenButton(
-                isOpening: _isOpening,
-                onTap: _openCapsule,
+          // 分享按钮
+          Padding(
+            padding: const EdgeInsets.only(left: 8),
+            child: GestureDetector(
+              onTap: () => ShareService.showShareSheet(context, wishText: c.wishText),
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: KouMingTheme.gold.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: KouMingTheme.gold.withValues(alpha: 0.2)),
+                ),
+                child: const Text('\u{1F4E4}', style: TextStyle(fontSize: 16)),
               ),
             ),
-          if (isFulfilled)
-            Padding(
-              padding: const EdgeInsets.only(left: 4),
-              child: GestureDetector(
-                onTap: () => ShareService.showShareSheet(context, wishText: c.wishText),
-                child: const Text('\u{1F4E4}', style: TextStyle(fontSize: 14)),
-              ),
+          ),
+          // 还愿按钮
+          Padding(
+            padding: const EdgeInsets.only(left: 8),
+            child: _FulfillButton(
+              isReady: isReady,
+              onTap: () => _showFulfillDialog(context),
             ),
+          ),
         ],
       ),
     );
   }
 
-  Future<void> _openCapsule() async {
-    if (_isOpening) return;
-    setState(() => _isOpening = true);
-
-    await Future.delayed(const Duration(milliseconds: 600));
-    if (!mounted) return;
-
-    await FulfillCeremony.show(
-      context,
-      capsule: widget.capsule,
-      onCeremonyComplete: () {},
+  Future<void> _showFulfillDialog(BuildContext context) async {
+    final result = await showDialog<_FulfillType>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: KouMingTheme.surface,
+        title: const Text('还愿方式', style: TextStyle(color: KouMingTheme.text)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Text('\u{1F4DD}', style: TextStyle(fontSize: 24)),
+              title: const Text('写一段话', style: TextStyle(color: KouMingTheme.text)),
+              subtitle: const Text('分享你的心愿故事（至少30字）', style: TextStyle(color: KouMingTheme.dim, fontSize: 11)),
+              onTap: () => Navigator.pop(ctx, _FulfillType.text),
+            ),
+            ListTile(
+              leading: const Text('\u{1F4B0}', style: TextStyle(fontSize: 24)),
+              title: const Text('捐款', style: TextStyle(color: KouMingTheme.text)),
+              subtitle: const Text('捐款1元以上用于公益事业', style: TextStyle(color: KouMingTheme.dim, fontSize: 11)),
+              onTap: () => Navigator.pop(ctx, _FulfillType.donate),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消', style: TextStyle(color: KouMingTheme.dim)),
+          ),
+        ],
+      ),
     );
 
-    if (!mounted) return;
-    widget.onFulfill(widget.capsule);
-    setState(() => _isOpening = false);
+    if (result == null) return;
+
+    if (result == _FulfillType.text) {
+      final text = await _showTextInputDialog(context);
+      if (text != null && text.length >= 30) {
+        // 传递还愿文字
+        final updatedCapsule = widget.capsule.copyWith(fulfillText: text);
+        widget.onFulfill(updatedCapsule);
+      }
+    } else if (result == _FulfillType.donate) {
+      final amount = await _showDonateDialog(context);
+      if (amount != null && amount >= 1.0) {
+        widget.onFulfill(widget.capsule);
+      }
+    }
+  }
+
+  void _showBlessingsDialog(BuildContext context) {
+    final blessings = widget.capsule.blessings;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: KouMingTheme.surface,
+        title: const Text('收到的祝福', style: TextStyle(color: KouMingTheme.gold, fontFamily: 'MaShanZheng')),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: blessings.isEmpty
+              ? const Text('还没有收到祝福，去捞愿给别人写祝福吧！', style: TextStyle(color: KouMingTheme.dim))
+              : ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: blessings.length,
+                  itemBuilder: (_, i) => Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: KouMingTheme.deep.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: KouMingTheme.gold.withValues(alpha: 0.1)),
+                    ),
+                    child: Text(
+                      blessings[i],
+                      style: const TextStyle(color: KouMingTheme.text, fontSize: 13, height: 1.4),
+                    ),
+                  ),
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('关闭', style: TextStyle(color: KouMingTheme.gold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<String?> _showTextInputDialog(BuildContext context) async {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: KouMingTheme.surface,
+        title: const Text('写下你的心愿故事', style: TextStyle(color: KouMingTheme.text)),
+        content: TextField(
+          controller: controller,
+          maxLines: 5,
+          style: const TextStyle(color: KouMingTheme.text),
+          decoration: InputDecoration(
+            hintText: '分享这个愿望背后的故事...（至少30字）',
+            hintStyle: const TextStyle(color: KouMingTheme.dim, fontSize: 12),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消', style: TextStyle(color: KouMingTheme.dim)),
+          ),
+          TextButton(
+            onPressed: () {
+              final text = controller.text.trim();
+              if (text.length >= 30) {
+                Navigator.pop(ctx, text);
+              } else {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text('请至少写30字')),
+                );
+              }
+            },
+            child: const Text('提交', style: TextStyle(color: KouMingTheme.gold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<double?> _showDonateDialog(BuildContext context) async {
+    final controller = TextEditingController();
+    return showDialog<double>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: KouMingTheme.surface,
+        title: const Text('捐款金额', style: TextStyle(color: KouMingTheme.text)),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          style: const TextStyle(color: KouMingTheme.text),
+          decoration: InputDecoration(
+            hintText: '输入金额（至少1元）',
+            hintStyle: const TextStyle(color: KouMingTheme.dim, fontSize: 12),
+            prefixText: '¥ ',
+            prefixStyle: const TextStyle(color: KouMingTheme.gold),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消', style: TextStyle(color: KouMingTheme.dim)),
+          ),
+          TextButton(
+            onPressed: () {
+              final text = controller.text.trim();
+              final amount = double.tryParse(text);
+              if (amount != null && amount >= 1.0) {
+                Navigator.pop(ctx, amount);
+              } else {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(content: Text('捐款金额需大于1元')),
+                );
+              }
+            },
+            child: const Text('确定', style: TextStyle(color: KouMingTheme.gold)),
+          ),
+        ],
+      ),
+    );
   }
 }
 
-class _OpenButton extends StatelessWidget {
-  final bool isOpening;
+enum _FulfillType { text, donate }
+
+class _FulfillButton extends StatelessWidget {
+  final bool isReady;
   final VoidCallback onTap;
 
-  const _OpenButton({required this.isOpening, required this.onTap});
+  const _FulfillButton({required this.isReady, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: isOpening ? null : onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          gradient: isOpening ? null : const LinearGradient(colors: KouMingTheme.payGradient),
-          color: isOpening ? KouMingTheme.gold.withValues(alpha: 0.3) : null,
+          gradient: isReady ? const LinearGradient(colors: KouMingTheme.payGradient) : null,
+          color: isReady ? null : KouMingTheme.dim.withValues(alpha: 0.15),
           borderRadius: BorderRadius.circular(8),
-          boxShadow: isOpening ? null : [BoxShadow(color: KouMingTheme.gold.withValues(alpha: 0.3), blurRadius: 8)],
+          boxShadow: isReady ? [BoxShadow(color: KouMingTheme.gold.withValues(alpha: 0.3), blurRadius: 8)] : null,
         ),
         child: Text(
-          isOpening ? '\u23F3' : '\u{1F513}',
+          '还愿',
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w600,
-            color: isOpening ? KouMingTheme.dim : KouMingTheme.deep,
+            color: isReady ? KouMingTheme.deep : KouMingTheme.dim,
           ),
         ),
       ),

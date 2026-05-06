@@ -10,6 +10,9 @@ class Wish {
   final DateTime createdAt;
   final String? ownerId;
   final bool isMine;
+  final int blessingCount; // 收到的文字祝福条数
+  final List<String> blessings; // 收到的祝福文字列表
+  final String? fulfillText; // 还愿文字
 
   const Wish({
     required this.id,
@@ -19,9 +22,12 @@ class Wish {
     required this.createdAt,
     this.ownerId,
     this.isMine = false,
+    this.blessingCount = 0,
+    this.blessings = const [],
+    this.fulfillText,
   });
 
-  Wish copyWith({int? lights}) => Wish(
+  Wish copyWith({int? lights, int? blessingCount, List<String>? blessings, String? fulfillText}) => Wish(
         id: id,
         text: text,
         category: category,
@@ -29,6 +35,9 @@ class Wish {
         createdAt: createdAt,
         ownerId: ownerId,
         isMine: isMine,
+        blessingCount: blessingCount ?? this.blessingCount,
+        blessings: blessings ?? this.blessings,
+        fulfillText: fulfillText ?? this.fulfillText,
       );
 
   Map<String, dynamic> toJson() => {
@@ -39,6 +48,9 @@ class Wish {
         'createdAt': createdAt.toIso8601String(),
         'ownerId': ownerId,
         'isMine': isMine,
+        'blessingCount': blessingCount,
+        'blessings': blessings,
+        'fulfillText': fulfillText,
       };
 
   factory Wish.fromJson(Map<String, dynamic> json) => Wish(
@@ -49,6 +61,9 @@ class Wish {
         createdAt: DateTime.parse(json['createdAt'] as String),
         ownerId: json['ownerId'] as String?,
         isMine: json['isMine'] as bool? ?? false,
+        blessingCount: json['blessingCount'] as int? ?? 0,
+        blessings: (json['blessings'] as List<dynamic>?)?.cast<String>() ?? const [],
+        fulfillText: json['fulfillText'] as String?,
       );
 }
 
@@ -59,6 +74,10 @@ class WishCapsule {
   final DateTime dueDate;
   final String category;
   final CapsuleStatus status;
+  final int lights; // 被点灯数
+  final int blessingCount; // 收到的文字祝福条数
+  final List<String> blessings; // 收到的祝福文字列表
+  final String? fulfillText; // 还愿时写的文字
 
   const WishCapsule({
     required this.id,
@@ -67,19 +86,27 @@ class WishCapsule {
     required this.dueDate,
     required this.category,
     this.status = CapsuleStatus.waiting,
+    this.lights = 0,
+    this.blessingCount = 0,
+    this.blessings = const [],
+    this.fulfillText,
   });
 
   int get daysLeft =>
       dueDate.difference(DateTime.now()).inDays.clamp(0, 99999);
   bool get canFulfill => daysLeft <= 0 && status == CapsuleStatus.waiting;
 
-  WishCapsule copyWith({CapsuleStatus? s}) => WishCapsule(
+  WishCapsule copyWith({CapsuleStatus? s, int? lights, int? blessingCount, List<String>? blessings, String? fulfillText}) => WishCapsule(
         id: id,
         wishText: wishText,
         createdAt: createdAt,
         dueDate: dueDate,
         category: category,
         status: s ?? status,
+        lights: lights ?? this.lights,
+        blessingCount: blessingCount ?? this.blessingCount,
+        blessings: blessings ?? this.blessings,
+        fulfillText: fulfillText ?? this.fulfillText,
       );
 
   Map<String, dynamic> toJson() => {
@@ -89,6 +116,10 @@ class WishCapsule {
         'dueDate': dueDate.toIso8601String(),
         'category': category,
         'status': status.name,
+        'lights': lights,
+        'blessingCount': blessingCount,
+        'blessings': blessings,
+        'fulfillText': fulfillText,
       };
 
   factory WishCapsule.fromJson(Map<String, dynamic> json) => WishCapsule(
@@ -101,6 +132,10 @@ class WishCapsule {
           (e) => e.name == json['status'],
           orElse: () => CapsuleStatus.waiting,
         ),
+        lights: json['lights'] as int? ?? 0,
+        blessingCount: json['blessingCount'] as int? ?? 0,
+        blessings: (json['blessings'] as List<dynamic>?)?.cast<String>() ?? const [],
+        fulfillText: json['fulfillText'] as String?,
       );
 }
 
@@ -128,17 +163,15 @@ enum FortuneLevel { supreme, great, medium, low, bad }
 
 class Reading {
   final String hexagram;
-  final String element;
-  final String body;
-  final String advice;
+  final String interpretation;
+  final String advice1;
   final int similarCount;
   final int fulfilledCount;
 
   const Reading({
     required this.hexagram,
-    required this.element,
-    required this.body,
-    required this.advice,
+    required this.interpretation,
+    required this.advice1,
     required this.similarCount,
     required this.fulfilledCount,
   });
@@ -191,12 +224,15 @@ class AppState {
   final Set<String> litWishes;
   final int meritPoints;
   final bool freeReadingUsed;
+  final int freeOracleUsed;      // 今日已用免费算卦次数
+  final int freeFateDrawUsed;    // 今日已用免费祈福签次数
   final List<WishCapsule> capsules;
   final int fishedCount;
   final Map<String, int> extraLights;
   final String lastResetDate; // YYYY-MM-DD
   final List<KouBadge> badges;
   final String userId;
+  final String nickname; // 用户昵称
 
   const AppState({
     this.throwLimit = 3,
@@ -207,25 +243,66 @@ class AppState {
     this.litWishes = const {},
     this.meritPoints = 0,
     this.freeReadingUsed = false,
+    this.freeOracleUsed = 0,
+    this.freeFateDrawUsed = 0,
     this.capsules = const [],
     this.fishedCount = 0,
     this.extraLights = const {},
     this.lastResetDate = '',
     this.badges = const [],
     this.userId = '',
+    this.nickname = '',
   });
 
-  int get meritLevel => meritPoints ~/ 15 + 1;
-  double get meritProgress => (meritPoints % 15) / 15;
+  /// 祝福等级 - 线性增长，每级+100祝福
+  /// Lv1: 0-99, Lv2: 100-199, Lv3: 200-299, Lv4: 300-399, Lv5: 400-499
+  /// Lv6: 500-599, Lv7: 600-699, Lv8: 700-799, Lv9: 800-899, Lv10+: 900+
+  int get meritLevel {
+    final total = blessingCount;
+    if (total >= 900) return 10 + (total - 900) ~/ 100;
+    return (total ~/ 100) + 1;
+  }
+
+  /// 等级福利 - 返回当前等级的特权
+  LevelBenefits get levelBenefits => LevelBenefits.forLevel(meritLevel);
+
+  /// 当前等级进度 (0.0 - 1.0)
+  double get meritProgress {
+    final total = blessingCount;
+    final level = meritLevel;
+    final current = (level - 1) * 100;
+    final next = level * 100;
+    return ((total - current) / (next - current)).clamp(0.0, 1.0);
+  }
+
+  /// 升到下一级需要的祝福数
+  int get meritToNextLevel {
+    final total = blessingCount;
+    final level = meritLevel;
+    final nextThreshold = level * 100;
+    return nextThreshold - total;
+  }
+
+  /// 祝福数计算公式：
+  /// 法物购买获得的祝福值 + 还愿获得的祝福值 + 收到祝福文字的总和
+  /// meritPoints 只包含法物购买 + 还愿
+  /// 收到祝福文字 = 所有心愿胶囊的 blessingCount 总和
+  int get blessingCount {
+    final capsuleBlessings = capsules.fold<int>(0, (sum, c) => sum + c.blessingCount);
+    return meritPoints + capsuleBlessings;
+  }
 
   /// Check if daily limits need reset (new day)
   AppState checkDailyReset() {
     final today = DateTime.now().toIso8601String().substring(0, 10);
     if (lastResetDate != today) {
+      final benefits = levelBenefits;
       return copyWith(
-        throwLimit: 3,
-        fishLimit: 5,
+        throwLimit: benefits.dailyThrowLimit,
+        fishLimit: benefits.dailyFishLimit,
         freeReadingUsed: false,
+        freeOracleUsed: 0,
+        freeFateDrawUsed: 0,
         lastResetDate: today,
       );
     }
@@ -235,7 +312,7 @@ class AppState {
   /// Evaluate and unlock earned badges
   AppState evaluateBadges() {
     final updated = <KouBadge>[];
-    for (final b in _allBadgeDefs) {
+    for (final b in allBadgeDefs) {
       final isEarned = _checkBadge(b.id);
       final existing = badges.firstWhere(
         (e) => e.id == b.id,
@@ -263,7 +340,7 @@ class AppState {
     }
   }
 
-  static const _allBadgeDefs = <KouBadge>[
+  static const allBadgeDefs = <KouBadge>[
     KouBadge(id: 'first_wish', label: '初愿', emoji: '🌊'),
     KouBadge(id: 'throw_10', label: '叩命达人', emoji: '🎯'),
     KouBadge(id: 'throw_50', label: '执念者', emoji: '💎'),
@@ -286,12 +363,15 @@ class AppState {
     Set<String>? litWishes,
     int? meritPoints,
     bool? freeReadingUsed,
+    int? freeOracleUsed,
+    int? freeFateDrawUsed,
     List<WishCapsule>? capsules,
     int? fishedCount,
     Map<String, int>? extraLights,
     String? lastResetDate,
     List<KouBadge>? badges,
     String? userId,
+    String? nickname,
   }) =>
       AppState(
         throwLimit: throwLimit ?? this.throwLimit,
@@ -302,11 +382,82 @@ class AppState {
         litWishes: litWishes ?? this.litWishes,
         meritPoints: meritPoints ?? this.meritPoints,
         userId: userId ?? this.userId,
+        nickname: nickname ?? this.nickname,
         freeReadingUsed: freeReadingUsed ?? this.freeReadingUsed,
+        freeOracleUsed: freeOracleUsed ?? this.freeOracleUsed,
+        freeFateDrawUsed: freeFateDrawUsed ?? this.freeFateDrawUsed,
         capsules: capsules ?? this.capsules,
         fishedCount: fishedCount ?? this.fishedCount,
         extraLights: extraLights ?? this.extraLights,
         lastResetDate: lastResetDate ?? this.lastResetDate,
         badges: badges ?? this.badges,
       );
+}
+
+/// 等级福利系统 - 升级增加许愿和祈福签免费次数
+class LevelBenefits {
+  final int dailyThrowLimit;      // 每日投愿次数
+  final int dailyFishLimit;       // 每日捞愿次数
+  final int freeOracleCount;      // 免费算卦次数
+  final int freeFateDrawCount;    // 免费天命签次数
+  final String title;             // 称号
+
+  const LevelBenefits({
+    this.dailyThrowLimit = 3,
+    this.dailyFishLimit = 5,
+    this.freeOracleCount = 0,
+    this.freeFateDrawCount = 0,
+    this.title = '寻光者',
+  });
+
+  /// 升级规则：每升1级，许愿+1次，捞愿+1次
+  /// 每升2级，免费算卦+1次
+  /// 每升3级，免费天命签+1次
+  factory LevelBenefits.forLevel(int level) {
+    // 基础值 + 等级增量
+    final throwLimit = 3 + level;           // Lv1=4, Lv2=5, Lv3=6...
+    final fishLimit = 5 + level;            // Lv1=6, Lv2=7, Lv3=8...
+    final oracleCount = level ~/ 2;         // Lv1=0, Lv2=1, Lv3=1, Lv4=2...
+    final fateDrawCount = level ~/ 3;       // Lv1=0, Lv2=0, Lv3=1, Lv4=1...
+
+    // 每级都有独特称号
+    final titles = [
+      '寻光者',      // Lv1
+      '修行者',      // Lv2
+      '悟道者',      // Lv3
+      '护法',        // Lv4
+      '长老',        // Lv5
+      '尊者',        // Lv6
+      '圣者',        // Lv7
+      '半仙',        // Lv8
+      '天命之人',    // Lv9
+      '化境',        // Lv10
+    ];
+    String title;
+    if (level >= 1 && level <= 10) {
+      title = titles[level - 1];
+    } else if (level > 10) {
+      title = '化境';
+    } else {
+      title = '寻光者';
+    }
+
+    return LevelBenefits(
+      dailyThrowLimit: throwLimit,
+      dailyFishLimit: fishLimit,
+      freeOracleCount: oracleCount,
+      freeFateDrawCount: fateDrawCount,
+      title: title,
+    );
+  }
+
+  String get benefitsText {
+    final parts = <String>[
+      '每日许愿 $dailyThrowLimit 次',
+      '每日捞愿 $dailyFishLimit 次',
+      if (freeOracleCount > 0) '免费算卦 $freeOracleCount 次',
+      if (freeFateDrawCount > 0) '免费祈福签 $freeFateDrawCount 次',
+    ];
+    return parts.join(' · ');
+  }
 }

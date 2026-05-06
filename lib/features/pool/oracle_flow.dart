@@ -1,10 +1,12 @@
-import 'dart:math';
+﻿import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:kouming/shared/theme/kouming_theme.dart';
 import 'package:kouming/shared/models/kouming_models.dart';
 import 'package:kouming/services/ai_service.dart';
 import 'package:kouming/services/i18n_service.dart';
 import 'package:kouming/services/share_service.dart';
+import 'package:kouming/services/alipay_service.dart';
+import 'package:kouming/services/supabase_service.dart';
 
 /// ─── Pool Spirit Oracle — Full Conversation Flow ───
 ///
@@ -21,8 +23,9 @@ class OracleFlow {
     BuildContext context, {
     required Wish wish,
     required AiService aiService,
-    required bool freeReadingUsed,
-    required void Function(bool) onFreeReadingUsed,
+    required int freeOracleUsed,
+    required int freeOracleCount,
+    required void Function() onFreeOracleUsed,
   }) {
     return showModalBottomSheet(
       context: context,
@@ -32,8 +35,9 @@ class OracleFlow {
       builder: (ctx) => _OracleSheet(
         wish: wish,
         aiService: aiService,
-        freeReadingUsed: freeReadingUsed,
-        onFreeReadingUsed: onFreeReadingUsed,
+        freeOracleUsed: freeOracleUsed,
+        freeOracleCount: freeOracleCount,
+        onFreeOracleUsed: onFreeOracleUsed,
       ),
     );
   }
@@ -42,14 +46,16 @@ class OracleFlow {
 class _OracleSheet extends StatefulWidget {
   final Wish wish;
   final AiService aiService;
-  final bool freeReadingUsed;
-  final void Function(bool) onFreeReadingUsed;
+  final int freeOracleUsed;
+  final int freeOracleCount;
+  final void Function() onFreeOracleUsed;
 
   const _OracleSheet({
     required this.wish,
     required this.aiService,
-    required this.freeReadingUsed,
-    required this.onFreeReadingUsed,
+    required this.freeOracleUsed,
+    required this.freeOracleCount,
+    required this.onFreeOracleUsed,
   });
 
   @override
@@ -65,12 +71,11 @@ class _OracleSheetState extends State<_OracleSheet>
   late AnimationController _hexFlipCtrl;
   Reading? _reading;
   String? _errorMessage;
-  late bool _isFirstReading;
+  bool get _hasFreeOracle => widget.freeOracleUsed < widget.freeOracleCount;
 
   @override
   void initState() {
     super.initState();
-    _isFirstReading = !widget.freeReadingUsed;
     _mistCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1800),
@@ -89,6 +94,12 @@ class _OracleSheetState extends State<_OracleSheet>
   }
 
   Future<void> _startDivination() async {
+    // 检查免费次数
+    if (!_hasFreeOracle) {
+      _showLimitReachedDialog('今日免费算卦次数已用完', '明天再来吧，或者付费使用');
+      return;
+    }
+    
     setState(() => _phase = _Phase.casting);
     _mistCtrl.repeat(reverse: true);
 
@@ -104,8 +115,87 @@ class _OracleSheetState extends State<_OracleSheet>
         _reading = reading;
         _phase = _Phase.result;
       });
-      if (_isFirstReading) {
-        widget.onFreeReadingUsed(true);
+      if (_hasFreeOracle) {
+        widget.onFreeOracleUsed();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      _mistCtrl.stop();
+      setState(() {
+        _errorMessage = I18n.t('spirit_error_msg');
+        _phase = _Phase.error;
+      });
+    }
+  }
+
+  void _showLimitReachedDialog(String title, String message) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: KouMingTheme.surface,
+        title: Text(title, style: const TextStyle(color: KouMingTheme.gold, fontFamily: 'MaShanZheng')),
+        content: Text(message, style: const TextStyle(color: KouMingTheme.text)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('知道了', style: TextStyle(color: KouMingTheme.dim)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _payForOracle();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: KouMingTheme.gold,
+              foregroundColor: KouMingTheme.deep,
+            ),
+            child: const Text('去付费 ¥6', style: TextStyle(fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _payForOracle() async {
+    setState(() => _phase = _Phase.casting);
+    _mistCtrl.repeat(reverse: true);
+
+    try {
+      // 获取用户ID（确保已登录）
+      final supabase = SupabaseService();
+      await supabase.ensureLogin();
+      final userId = supabase.userId ?? 'anonymous';
+
+      // 调用支付宝支付
+      final result = await AlipayService.pay(
+        product: 'oracle',
+        userId: userId,
+      );
+
+      if (result == 'success') {
+        // 支付成功，进行算卦
+        final reading = await widget.aiService.generateReading(
+          widget.wish.text,
+          widget.wish.category,
+        );
+        if (!mounted) return;
+        _mistCtrl.stop();
+        _hexFlipCtrl.forward(from: 0);
+        setState(() {
+          _reading = reading;
+          _phase = _Phase.result;
+        });
+      } else if (result == 'canceled') {
+        if (!mounted) return;
+        _mistCtrl.stop();
+        setState(() => _phase = _Phase.greet);
+      } else {
+        if (!mounted) return;
+        _mistCtrl.stop();
+        setState(() {
+          _errorMessage = '支付失败，请重试';
+          _phase = _Phase.error;
+        });
       }
     } catch (e) {
       if (!mounted) return;
@@ -189,7 +279,7 @@ class _OracleSheetState extends State<_OracleSheet>
           _SpiritBubble(
             messages: [
               I18n.t('spirit_saw'),
-              _isFirstReading
+              _hasFreeOracle
                   ? I18n.t('spirit_first_free')
                   : I18n.t('spirit_pay_hint'),
               '"${widget.wish.text}"',
@@ -279,7 +369,7 @@ class _OracleSheetState extends State<_OracleSheet>
                       const Text('\u{1F52E}', style: TextStyle(fontSize: 16)),
                       const SizedBox(width: 6),
                       Text(
-                        _isFirstReading
+                        _hasFreeOracle
                             ? I18n.t('spirit_do_reading')
                             : '${I18n.t('spirit_do_reading')} (\u00A56)',
                         style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
@@ -446,16 +536,12 @@ class _OracleSheetState extends State<_OracleSheet>
           ),
           const SizedBox(height: 16),
 
-          if (r.element.isNotEmpty) ...[
-            _buildSection('\u2694 ${I18n.t('reading_element')}', r.element, KouMingTheme.water),
+          if (r.interpretation.isNotEmpty) ...[
+            _buildSection('🔮 ${I18n.t('reading_interpretation')}', r.interpretation, KouMingTheme.text, isBody: true),
             const SizedBox(height: 14),
           ],
-          if (r.body.isNotEmpty) ...[
-            _buildSection('\u{1F4AD} ${I18n.t('reading_advice')}', r.body, KouMingTheme.text, isBody: true),
-            const SizedBox(height: 14),
-          ],
-          if (r.advice.isNotEmpty) ...[
-            _buildSection('\u2728 ${I18n.t('reading_advice')}', r.advice, KouMingTheme.gold),
+          if (r.advice1.isNotEmpty) ...[
+            _buildSection('💡 ${I18n.t('reading_advice_1')}', r.advice1, KouMingTheme.water),
             const SizedBox(height: 14),
           ],
 
@@ -845,15 +931,83 @@ class _TrigramLines extends StatelessWidget {
   final String hexagram;
   const _TrigramLines({required this.hexagram});
 
-  List<bool> _generateLines() {
-    final hash = hexagram.hashCode;
-    final rng = Random(hash > 0 ? hash : -hash);
-    return List.generate(6, (_) => rng.nextBool());
+  /// 64卦的爻象定义：true=阳爻(—)，false=阴爻(- -)
+  static const _hexagramLines = {
+    '乾卦': [true, true, true, true, true, true],
+    '坤卦': [false, false, false, false, false, false],
+    '屯卦': [false, false, true, false, true, false],
+    '蒙卦': [true, false, false, false, false, true],
+    '需卦': [true, true, true, true, false, false],
+    '讼卦': [false, false, true, true, true, true],
+    '师卦': [false, false, false, true, false, false],
+    '比卦': [false, false, true, false, false, false],
+    '小畜卦': [true, true, true, false, true, false],
+    '履卦': [false, true, true, true, true, true],
+    '泰卦': [true, true, true, false, false, false],
+    '否卦': [false, false, false, true, true, true],
+    '同人卦': [false, true, false, true, true, true],
+    '大有卦': [true, true, true, false, true, false],
+    '谦卦': [true, false, false, false, false, false],
+    '豫卦': [false, false, false, false, true, false],
+    '随卦': [false, true, false, false, true, true],
+    '蛊卦': [false, true, false, true, false, false],
+    '临卦': [false, true, true, false, false, false],
+    '观卦': [false, false, false, false, true, false],
+    '噬嗑卦': [false, true, false, false, true, false],
+    '贲卦': [false, true, false, true, false, false],
+    '剥卦': [false, false, false, true, false, false],
+    '复卦': [false, true, false, false, false, false],
+    '无妄卦': [false, true, false, true, true, true],
+    '大畜卦': [true, true, true, true, false, false],
+    '颐卦': [false, true, false, true, false, false],
+    '大过卦': [false, true, false, false, true, true],
+    '坎卦': [false, true, false, false, true, false],
+    '离卦': [true, false, true, true, false, true],
+    '咸卦': [true, false, false, false, true, true],
+    '恒卦': [false, true, false, false, true, false],
+    '遁卦': [true, false, false, true, true, true],
+    '大壮卦': [true, true, true, false, true, false],
+    '晋卦': [false, false, false, false, true, false],
+    '明夷卦': [false, true, false, false, false, false],
+    '家人卦': [false, true, false, false, true, false],
+    '睽卦': [false, true, true, false, true, false],
+    '蹇卦': [true, false, false, true, false, false],
+    '解卦': [false, false, true, false, true, false],
+    '损卦': [false, true, true, true, false, false],
+    '益卦': [false, false, true, false, true, false],
+    '夬卦': [true, true, true, false, true, true],
+    '姤卦': [false, true, false, true, true, true],
+    '萃卦': [false, false, false, false, true, true],
+    '升卦': [false, true, false, false, false, false],
+    '困卦': [false, true, true, true, false, false],
+    '井卦': [false, false, true, false, true, false],
+    '革卦': [false, true, false, false, true, true],
+    '鼎卦': [false, true, true, false, true, false],
+    '震卦': [false, false, true, false, false, true],
+    '艮卦': [true, false, false, true, false, false],
+    '渐卦': [true, false, false, false, true, false],
+    '归妹卦': [false, true, false, false, true, true],
+    '丰卦': [false, true, false, false, true, false],
+    '旅卦': [false, true, false, true, false, false],
+    '巽卦': [false, true, false, true, false, true],
+    '兑卦': [false, true, true, false, true, true],
+    '涣卦': [false, false, true, false, true, false],
+    '节卦': [false, true, true, true, false, false],
+    '中孚卦': [false, true, false, false, true, true],
+    '小过卦': [false, true, false, true, false, false],
+    '既济卦': [false, true, false, true, false, false],
+    '未济卦': [false, false, true, false, true, false],
+  };
+
+  List<bool> _getLines() {
+    // 从卦象名称提取卦名（去掉符号）
+    final name = hexagram.split(' ').first;
+    return _hexagramLines[name] ?? [true, true, true, true, true, true];
   }
 
   @override
   Widget build(BuildContext context) {
-    final lines = _generateLines();
+    final lines = _getLines();
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: lines.reversed.map((isYang) {

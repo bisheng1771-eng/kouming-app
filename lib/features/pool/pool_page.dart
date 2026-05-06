@@ -11,12 +11,11 @@ import 'package:kouming/features/pool/fishing_flow.dart';
 class PoolPage extends StatefulWidget {
   final AppState state;
   final void Function(AppState) onStateChanged;
-  final void Function(Wish) onWishCreated;
+  final void Function(Wish, int) onWishCreated;
   final void Function(String) onLightWish;
   final VoidCallback onReadingRequested;
   final AiService aiService;
-  final bool freeReadingUsed;
-  final void Function(bool) onFreeReadingUsed;
+  final Future<bool> Function()? requireLogin;
 
   const PoolPage({
     super.key,
@@ -26,8 +25,7 @@ class PoolPage extends StatefulWidget {
     required this.onLightWish,
     required this.onReadingRequested,
     required this.aiService,
-    required this.freeReadingUsed,
-    required this.onFreeReadingUsed,
+    this.requireLogin,
   });
 
   @override
@@ -44,6 +42,7 @@ class _PoolPageState extends State<PoolPage> with TickerProviderStateMixin {
   bool _fishing = false;
   Offset? _lanternPos;
   final SmartFisher _fisher = SmartFisher();
+  final Set<String> _fishedWishIds = {};
 
   final Map<String, Offset> _positions = {};
 
@@ -51,16 +50,16 @@ class _PoolPageState extends State<PoolPage> with TickerProviderStateMixin {
       DateTime.now().subtract(Duration(minutes: m));
 
   static final List<Wish> _pool = [
-    Wish(id: 'p1', text: '考上理想的学校！', category: 'study', lights: 892, createdAt: _ago(2)),
-    Wish(id: 'p2', text: '希望妈妈身体健康', category: 'health', lights: 1203, createdAt: _ago(5)),
-    Wish(id: 'p3', text: '今年能遇到对的人', category: 'love', lights: 674, createdAt: _ago(8)),
-    Wish(id: 'p4', text: '实现财务自由', category: 'money', lights: 1547, createdAt: _ago(12)),
-    Wish(id: 'p5', text: '拿到心仪的offer', category: 'study', lights: 423, createdAt: _ago(15)),
-    Wish(id: 'p6', text: '世界和平', category: 'default', lights: 256, createdAt: _ago(25)),
-    Wish(id: 'p7', text: '早日还清房贷', category: 'money', lights: 512, createdAt: _ago(30)),
-    Wish(id: 'p8', text: '他也能喜欢我就好了', category: 'love', lights: 741, createdAt: _ago(35)),
-    Wish(id: 'p9', text: '逢考必过！', category: 'study', lights: 1023, createdAt: _ago(40)),
-    Wish(id: 'p10', text: '狗狗手术顺利', category: 'health', lights: 668, createdAt: _ago(60)),
+    Wish(id: 'p1', text: '考上理想的学校！', category: 'study', lights: 892, createdAt: _ago(2), blessings: ['加油！相信你一定能考上理想的学校！', '坚持就是胜利，祝你金榜题名！']),
+    Wish(id: 'p2', text: '希望妈妈身体健康', category: 'health', lights: 1203, createdAt: _ago(5), fulfillText: '妈妈体检报告出来了，各项指标都正常！感谢大家的祝福！', blessings: ['祝阿姨身体健康，长命百岁！', '愿天下父母都健康长寿！']),
+    Wish(id: 'p3', text: '今年能遇到对的人', category: 'love', lights: 674, createdAt: _ago(8), blessings: ['缘分天注定，祝你早日遇到那个TA！', '相信自己，你值得最好的爱情！']),
+    Wish(id: 'p4', text: '实现财务自由', category: 'money', lights: 1547, createdAt: _ago(12), fulfillText: '经过三年的努力，终于攒够了人生的第一个100万！', blessings: ['祝你财源广进，早日实现财务自由！', '理财有道，财富自由指日可待！']),
+    Wish(id: 'p5', text: '拿到心仪的offer', category: 'study', lights: 423, createdAt: _ago(15), blessings: ['面试顺利，offer拿到手软！', '你的努力终将有回报！']),
+    Wish(id: 'p6', text: '世界和平', category: 'default', lights: 256, createdAt: _ago(25), blessings: ['愿世界和平，没有战争！', '大爱无疆，为你点赞！']),
+    Wish(id: 'p7', text: '早日还清房贷', category: 'money', lights: 512, createdAt: _ago(30), fulfillText: '最后一笔房贷还清了！房子终于完全属于自己了！', blessings: ['无债一身轻，恭喜！', '早日摆脱房奴身份！']),
+    Wish(id: 'p8', text: '他也能喜欢我就好了', category: 'love', lights: 741, createdAt: _ago(35), blessings: ['勇敢表白，不要错过缘分！', '双向奔赴的爱情最美好！']),
+    Wish(id: 'p9', text: '逢考必过！', category: 'study', lights: 1023, createdAt: _ago(40), blessings: ['考试顺利，超常发挥！', '复习充分，必过无疑！']),
+    Wish(id: 'p10', text: '狗狗手术顺利', category: 'health', lights: 668, createdAt: _ago(60), fulfillText: '狗狗手术很成功，现在已经能跑能跳了！谢谢大家的祝福！', blessings: ['祝狗狗早日康复！', '毛孩子一定会好起来的！']),
   ];
 
   @override
@@ -113,8 +112,14 @@ class _PoolPageState extends State<PoolPage> with TickerProviderStateMixin {
 
   Future<void> _throwWish() async {
     if (_throwing) return;
-    final text = _wishController.text.trim();
-    if (text.isEmpty || widget.state.throwLimit <= 0) return;
+    
+    // 弹出许愿输入对话框
+    final text = await _showWishInputDialog();
+    if (text == null || text.isEmpty) return;
+
+    // 弹出天数输入对话框
+    final days = await _showDaysInputDialog();
+    if (days == null || days < 1 || days > 365) return;
 
     setState(() => _throwing = true);
 
@@ -133,25 +138,184 @@ class _PoolPageState extends State<PoolPage> with TickerProviderStateMixin {
     if (mounted) setState(() => _throwing = false);
     _rippleCtrl.forward(from: 0);
 
-    _wishController.clear();
-    widget.onWishCreated(wish);
-
-    await Future.delayed(const Duration(milliseconds: 1500));
-    if (mounted) _openOracle(wish);
+    widget.onWishCreated(wish, days);
+    
+    // 投愿后询问是否算卦
+    if (mounted) {
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (!mounted) return;
+        _showOraclePrompt(wish);
+      });
+    }
+  }
+  
+  void _showOraclePrompt(Wish wish) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: KouMingTheme.surface,
+        title: Text('要算一卦吗？', style: TextStyle(color: KouMingTheme.gold, fontFamily: 'MaShanZheng')),
+        content: Text('池灵可以为你解读这个愿望的运势', style: TextStyle(color: KouMingTheme.text)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('稍后再说', style: TextStyle(color: KouMingTheme.dim)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _openOracle(wish);
+            },
+            child: Text('立即算卦', style: TextStyle(color: KouMingTheme.gold)),
+          ),
+        ],
+      ),
+    );
   }
 
-  void _startFishing() {
-    if (_fishing || widget.state.fishLimit <= 0) return;
+  Future<String?> _showWishInputDialog() async {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: KouMingTheme.surface,
+        title: const Text('写下你的心愿', style: TextStyle(color: KouMingTheme.text, fontFamily: 'MaShanZheng')),
+        content: TextField(
+          controller: controller,
+          style: const TextStyle(color: KouMingTheme.text),
+          decoration: InputDecoration(
+            hintText: '例如：希望家人平安健康',
+            hintStyle: const TextStyle(color: KouMingTheme.dim),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: KouMingTheme.dim),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: KouMingTheme.dim.withValues(alpha: 0.3)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: KouMingTheme.gold),
+            ),
+          ),
+          maxLines: 3,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消', style: TextStyle(color: KouMingTheme.dim)),
+          ),
+          TextButton(
+            onPressed: () {
+              final text = controller.text.trim();
+              if (text.isNotEmpty) {
+                Navigator.pop(ctx, text);
+              }
+            },
+            child: const Text('确定', style: TextStyle(color: KouMingTheme.gold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<int?> _showDaysInputDialog() async {
+    final controller = TextEditingController();
+    return showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: KouMingTheme.surface,
+        title: const Text('设定实现天数', style: TextStyle(color: KouMingTheme.text)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              '你希望这个愿望在多少天内实现？\n（1-365天）',
+              style: TextStyle(fontSize: 12, color: KouMingTheme.dim),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              style: const TextStyle(color: KouMingTheme.text),
+              decoration: InputDecoration(
+                hintText: '例如：30',
+                hintStyle: const TextStyle(color: KouMingTheme.dim),
+                suffixText: '天',
+                suffixStyle: const TextStyle(color: KouMingTheme.dim),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: KouMingTheme.dim),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: KouMingTheme.dim.withValues(alpha: 0.3)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: KouMingTheme.gold),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消', style: TextStyle(color: KouMingTheme.dim)),
+          ),
+          TextButton(
+            onPressed: () {
+              final text = controller.text.trim();
+              final days = int.tryParse(text);
+              if (days != null && days >= 1 && days <= 365) {
+                Navigator.pop(ctx, days);
+              } else {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(
+                    content: Text('请输入1-365之间的天数'),
+                    backgroundColor: KouMingTheme.purple,
+                  ),
+                );
+              }
+            },
+            child: const Text('确定', style: TextStyle(color: KouMingTheme.gold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _startFishing() async {
+    if (_fishing) return;
+    
+    // 检查登录状态
+    if (widget.requireLogin != null) {
+      final loggedIn = await widget.requireLogin!();
+      if (!loggedIn) return;
+    }
+    
+    // 检查次数是否用完
+    if (widget.state.fishLimit <= 0) {
+      _showLimitReachedDialog('今日次数使用完毕', '请明天再来');
+      return;
+    }
+    
     setState(() => _fishing = true);
   }
 
-  void _onFishingComplete() {
+  Future<void> _onFishingComplete() async {
     if (!_fishing) return;
 
     final result = _fisher.fish(
       pool: _pool,
       userWishes: widget.state.myWishes,
+      excludeIds: _fishedWishIds,
     );
+
+    // 记录已捞过的愿望ID
+    _fishedWishIds.add(result.wish.id);
 
     setState(() => _fishing = false);
 
@@ -161,18 +325,75 @@ class _PoolPageState extends State<PoolPage> with TickerProviderStateMixin {
     ));
 
     if (!mounted) return;
-    showModalBottomSheet(
+    bool hasBlessed = false;
+    String? blessingText;
+    await showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
+      isDismissible: true,
+      enableDrag: true,
       builder: (ctx) => FishedWishSheet(
         result: result,
-        isLit: widget.state.litWishes.contains(result.wish.id),
-        onLight: () {
-          Navigator.pop(ctx);
-          _lightWithAnimation(result.wish);
+        onBlessingComplete: () {
+          hasBlessed = true;
+        },
+        onBlessingText: (text) {
+          blessingText = text;
         },
       ),
     );
+    
+    // 如果没有写祝福，恢复捞愿次数
+    if (!hasBlessed) {
+      widget.onStateChanged(widget.state.copyWith(
+        fishLimit: widget.state.fishLimit + 1,
+        fishedCount: widget.state.fishedCount - 1,
+      ));
+      _fishedWishIds.remove(result.wish.id);
+    } else {
+      // 写了一条祝福，给被祝福的愿望增加祝福值
+      final updatedExtraLights = Map<String, int>.from(widget.state.extraLights);
+      updatedExtraLights[result.wish.id] = (updatedExtraLights[result.wish.id] ?? 0) + 1;
+      
+      // 更新_pool中对应愿望的blessingCount
+      final wishIndex = _pool.indexWhere((w) => w.id == result.wish.id);
+      if (wishIndex >= 0) {
+        _pool[wishIndex] = _pool[wishIndex].copyWith(
+          blessingCount: _pool[wishIndex].blessingCount + 1,
+        );
+      }
+      
+      // 写祝福增加对应心愿胶囊的blessingCount
+      final updatedCapsules = List<WishCapsule>.from(widget.state.capsules);
+      final capsuleIndex = updatedCapsules.indexWhere((c) => c.wishText == result.wish.text);
+      if (capsuleIndex >= 0) {
+        final capsule = updatedCapsules[capsuleIndex];
+        final newBlessings = List<String>.from(capsule.blessings);
+        if (blessingText != null) {
+          newBlessings.add(blessingText!);
+        }
+        updatedCapsules[capsuleIndex] = capsule.copyWith(
+          blessingCount: capsule.blessingCount + 1,
+          blessings: newBlessings,
+        );
+      }
+      
+      // 更新_pool中对应愿望的blessings
+      final poolWishIndex = _pool.indexWhere((w) => w.id == result.wish.id);
+      if (poolWishIndex >= 0 && blessingText != null) {
+        final wish = _pool[poolWishIndex];
+        final newBlessings = List<String>.from(wish.blessings);
+        newBlessings.add(blessingText!);
+        _pool[poolWishIndex] = wish.copyWith(
+          blessings: newBlessings,
+        );
+      }
+      
+      widget.onStateChanged(widget.state.copyWith(
+        extraLights: updatedExtraLights,
+        capsules: updatedCapsules,
+      ));
+    }
   }
 
   void _lightWithAnimation(Wish wish) {
@@ -184,6 +405,23 @@ class _PoolPageState extends State<PoolPage> with TickerProviderStateMixin {
       });
     }
     widget.onLightWish(wish.id);
+  }
+
+  void _showLimitReachedDialog(String title, String message) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: KouMingTheme.surface,
+        title: Text(title, style: const TextStyle(color: KouMingTheme.gold, fontFamily: 'MaShanZheng')),
+        content: Text(message, style: const TextStyle(color: KouMingTheme.text)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('知道了', style: TextStyle(color: KouMingTheme.gold)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showLightPicker() {
@@ -261,32 +499,7 @@ class _PoolPageState extends State<PoolPage> with TickerProviderStateMixin {
   }
 
   void _showDetail(Wish wish) {
-    final extra = widget.state.extraLights[wish.id] ?? 0;
-    final totalLights = wish.lights + extra;
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: KouMingTheme.deep,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => _WishDetailSheet(
-        wish: wish,
-        totalLights: totalLights,
-        isLit: widget.state.litWishes.contains(wish.id),
-        onLight: () {
-          Navigator.pop(ctx);
-          _lightWithAnimation(wish);
-        },
-        onOracle: () {
-          Navigator.pop(ctx);
-          _openOracle(wish);
-        },
-        onShare: () {
-          Navigator.pop(ctx);
-          ShareService.showShareSheet(context, wishText: wish.text);
-        },
-      ),
-    );
+    // 弹窗功能已删除
   }
 
   void _openOracle(Wish wish) {
@@ -294,8 +507,15 @@ class _PoolPageState extends State<PoolPage> with TickerProviderStateMixin {
       context,
       wish: wish,
       aiService: widget.aiService,
-      freeReadingUsed: widget.freeReadingUsed,
-      onFreeReadingUsed: widget.onFreeReadingUsed,
+      freeOracleUsed: widget.state.freeOracleUsed,
+      freeOracleCount: widget.state.levelBenefits.freeOracleCount,
+      onFreeOracleUsed: () {
+        widget.onStateChanged(
+          widget.state.copyWith(
+            freeOracleUsed: widget.state.freeOracleUsed + 1,
+          ),
+        );
+      },
     );
   }
 
@@ -432,21 +652,18 @@ class _PoolPageState extends State<PoolPage> with TickerProviderStateMixin {
                 I18n.t('pool_wishes_count', args: {'count': '${widget.state.totalWishes + _pool.length}'}),
                 style: const TextStyle(fontSize: 10, color: KouMingTheme.dim),
               ),
-              Text(
-                I18n.t('pool_wishes_count', args: {'count': '${widget.state.totalWishes + _pool.length}'}),
-                style: const TextStyle(fontSize: 10, color: KouMingTheme.dim),
-              ),
             ],
           ),
           const Spacer(),
+          // 显示已用次数 = 总次数 - 剩余次数
           _StatChip(
               label: I18n.t('pool_throw_label'),
-              value: '${widget.state.throwLimit}',
+              value: '${(widget.state.levelBenefits.dailyThrowLimit - widget.state.throwLimit).clamp(0, widget.state.levelBenefits.dailyThrowLimit)}',
               color: KouMingTheme.water),
           const SizedBox(width: 6),
           _StatChip(
-              label: I18n.t('pool_fish_label'),
-              value: '${widget.state.fishLimit}',
+              label: '捞愿',
+              value: '${(widget.state.levelBenefits.dailyFishLimit - widget.state.fishLimit).clamp(0, widget.state.levelBenefits.dailyFishLimit)}',
               color: KouMingTheme.purple),
         ],
       ),
@@ -464,40 +681,37 @@ class _PoolPageState extends State<PoolPage> with TickerProviderStateMixin {
         itemBuilder: (_, i) {
           final w = top5[i];
           final extra = widget.state.extraLights[w.id] ?? 0;
-          final tier = GlowTier.fromLights(w.lights + extra);
-          return GestureDetector(
-            onTap: () => _showDetail(w),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: KouMingTheme.surface.withValues(alpha: 0.7),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                    color: KouMingTheme.gold.withValues(alpha: 0.15)),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text('${tier.emoji} ${w.lights + extra}',
-                      style: const TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: KouMingTheme.gold)),
-                  const SizedBox(height: 2),
-                  SizedBox(
-                    width: 72,
-                    child: Text(
-                      '"${w.text}"',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 9,
-                          fontStyle: FontStyle.italic,
-                          color: KouMingTheme.dim),
-                    ),
+          final total = w.lights + extra;
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: KouMingTheme.surface.withValues(alpha: 0.7),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                  color: KouMingTheme.gold.withValues(alpha: 0.15)),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text('\u{1F48C} $total',
+                    style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: KouMingTheme.gold)),
+                const SizedBox(height: 2),
+                SizedBox(
+                  width: 72,
+                  child: Text(
+                    '"${w.text}"',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 9,
+                        fontStyle: FontStyle.italic,
+                        color: KouMingTheme.dim),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           );
         },
@@ -522,7 +736,7 @@ class _PoolPageState extends State<PoolPage> with TickerProviderStateMixin {
             floatAnim: _floatCtrl,
             idx: i,
             isLit: widget.state.litWishes.contains(wish.id),
-            onTap: () => _showDetail(wish),
+            onTap: () {}, // 空函数，圆圈不可点击
           );
         }).toList(),
       );
@@ -580,83 +794,34 @@ class _PoolPageState extends State<PoolPage> with TickerProviderStateMixin {
     );
   }
 
-  /// Input bar with labeled action buttons and explanatory subtitles
+  /// Input bar with action buttons only
   Widget _inputBar() {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12),
-      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
         color: KouMingTheme.surface.withValues(alpha: 0.95),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: KouMingTheme.gold.withValues(alpha: 0.2)),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+      child: Row(
         children: [
-          // Text input row
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _wishController,
-                  style: const TextStyle(fontSize: 13, color: KouMingTheme.text),
-                  decoration: InputDecoration(
-                    hintText: I18n.t('pool_placeholder'),
-                    border: InputBorder.none,
-                    isDense: true,
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                  ),
-                  onSubmitted: (_) => _throwWish(),
-                ),
-              ),
-              if (widget.state.throwLimit > 0)
-                IconButton(
-                  onPressed: _throwWish,
-                  icon: const Text('\u{1FA99}', style: TextStyle(fontSize: 22)),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 36),
-                ),
-              IconButton(
-                onPressed: widget.state.fishLimit > 0 ? _startFishing : null,
-                icon: const Text('\u{1F3A3}', style: TextStyle(fontSize: 20)),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 36),
-              ),
-            ],
+          _ActionButton(
+            emoji: '\u{1FA99}',
+            label: I18n.t('pool_throw_label'),
+            subtitle: I18n.t('pool_throw_hint'),
+            meaning: I18n.t('pool_throw_meaning'),
+            count: widget.state.throwLimit,
+            onTap: _throwWish,
           ),
-          // Action buttons with explanations
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              _ActionButton(
-                emoji: '\u{1FA99}',
-                label: I18n.t('pool_throw_label'),
-                subtitle: I18n.t('pool_throw_hint'),
-                meaning: I18n.t('pool_throw_meaning'),
-                count: widget.state.throwLimit,
-                onTap: widget.state.throwLimit > 0 ? _throwWish : null,
-              ),
-              const SizedBox(width: 6),
-              _ActionButton(
-                emoji: '\u{1F3A3}',
-                label: I18n.t('pool_fish_label'),
-                subtitle: I18n.t('pool_fish_hint'),
-                meaning: I18n.t('pool_fish_meaning'),
-                count: widget.state.fishLimit,
-                onTap: widget.state.fishLimit > 0 ? _startFishing : null,
-              ),
-              const SizedBox(width: 6),
-              _ActionButton(
-                emoji: '\u{1F3EE}',
-                label: I18n.t('pool_light_label'),
-                subtitle: I18n.t('pool_light_hint'),
-                meaning: I18n.t('pool_light_meaning'),
-                count: null,
-                onTap: _showLightPicker,
-                showMeaning: true,
-              ),
-            ],
+          const SizedBox(width: 6),
+          _ActionButton(
+            emoji: '\u{1F3A3}',
+            label: '捞愿',
+            subtitle: I18n.t('pool_fish_hint'),
+            meaning: I18n.t('pool_fish_meaning'),
+            count: widget.state.fishLimit,
+            onTap: _startFishing,
           ),
         ],
       ),
@@ -672,7 +837,7 @@ class _ActionButton extends StatelessWidget {
   final String subtitle;
   final String meaning;
   final int? count;
-  final VoidCallback? onTap;
+  final Future<void> Function()? onTap;
   final bool showMeaning;
 
   const _ActionButton({
@@ -689,7 +854,7 @@ class _ActionButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Expanded(
       child: GestureDetector(
-        onTap: onTap,
+        onTap: onTap != null ? () async => await onTap!() : null,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
           decoration: BoxDecoration(
@@ -797,11 +962,52 @@ class _WishBubble extends StatelessWidget {
   double get _phaseX => idx * 0.7;
   double get _phaseY => idx * 1.1;
 
+  /// 根据祝福数计算气泡大小
+  /// 祝福数越多，气泡越大
+  double get _blessingSize {
+    final blessings = totalLights;
+    if (blessings >= 1000) return 110.0;
+    if (blessings >= 500) return 95.0;
+    if (blessings >= 200) return 80.0;
+    if (blessings >= 100) return 70.0;
+    if (blessings >= 50) return 62.0;
+    return 52.0;
+  }
+
+  /// 根据祝福数计算亮度
+  /// 祝福数越多，越亮
+  double get _blessingBrightness {
+    final blessings = totalLights;
+    if (blessings >= 1000) return 1.0;
+    if (blessings >= 500) return 0.85;
+    if (blessings >= 200) return 0.7;
+    if (blessings >= 100) return 0.55;
+    if (blessings >= 50) return 0.4;
+    return 0.25;
+  }
+
+  /// 根据祝福数计算垂直位置偏移
+  /// 祝福数越多，越靠下（视觉上位置越低，dy值越大）
+  double get _verticalOffset {
+    final blessings = totalLights;
+    // 祝福数越多，越靠下（dy值越大，位置越低）
+    // 注意：Stack中top值越大，位置越靠下
+    if (blessings >= 1000) return 80.0;
+    if (blessings >= 500) return 60.0;
+    if (blessings >= 200) return 40.0;
+    if (blessings >= 100) return 25.0;
+    if (blessings >= 50) return 10.0;
+    return -5.0;
+  }
+
+  /// 检查是否已还愿（有还愿文字表示已还愿）
+  bool get _isFulfilled => wish.fulfillText != null && wish.fulfillText!.isNotEmpty;
+
   @override
   Widget build(BuildContext context) {
     return Positioned(
       left: basePos.dx,
-      top: basePos.dy,
+      top: basePos.dy + _verticalOffset,
       child: AnimatedBuilder(
         animation: floatAnim,
         builder: (_, __) {
@@ -812,47 +1018,67 @@ class _WishBubble extends StatelessWidget {
             offset: Offset(dx, dy),
             child: RepaintBoundary(
               child: GestureDetector(
-                onTap: onTap,
+                onTap: () => _showBlessings(context),
                 child: Container(
-                  width: _size,
-                  height: _size,
+                  width: _blessingSize,
+                  height: _blessingSize,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    gradient: RadialGradient(
+                    // 已还愿：白底黑字；未还愿：原样
+                    color: _isFulfilled ? Colors.white : null,
+                    gradient: _isFulfilled ? null : RadialGradient(
                       colors: [
-                        _catColor.withValues(alpha: 0.25),
-                        _catColor.withValues(alpha: 0.08),
+                        _catColor.withValues(alpha: _blessingBrightness),
+                        _catColor.withValues(alpha: _blessingBrightness * 0.3),
                       ],
                       center: Alignment.topLeft,
                     ),
                     border: Border.all(
                       color: isLit
-                          ? KouMingTheme.lantern.withValues(alpha: 0.5)
-                          : _catColor.withValues(alpha: 0.15),
+                          ? KouMingTheme.lantern.withValues(alpha: _blessingBrightness + 0.2)
+                          : _catColor.withValues(alpha: _blessingBrightness * 0.6),
                       width: isLit ? 2 : 1,
                     ),
-                    boxShadow: isLit
-                        ? [
-                            BoxShadow(
-                              color: KouMingTheme.lantern.withValues(alpha: 0.25),
-                              blurRadius: 12,
-                            )
-                          ]
-                        : null,
+                    boxShadow: [
+                      BoxShadow(
+                        color: KouMingTheme.lantern.withValues(alpha: _blessingBrightness * 0.5),
+                        blurRadius: 8 + _blessingBrightness * 20,
+                      )
+                    ],
                   ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
+                      if (_isFulfilled) ...[
+                        // 已还愿扣章
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: KouMingTheme.gold,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text(
+                            '已还愿',
+                            style: TextStyle(
+                              fontSize: 7,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF1A1A2E),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                      ],
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 6),
                         child: Text(
                           wish.text,
-                          maxLines: 2,
+                          maxLines: _isFulfilled ? 1 : 2,
                           overflow: TextOverflow.ellipsis,
                           textAlign: TextAlign.center,
                           style: TextStyle(
-                            fontSize: _size > 70 ? 9 : 7,
-                            color: KouMingTheme.text,
+                            fontSize: _blessingSize > 70 ? 9 : 7,
+                            // 已还愿：黑字；未还愿：白字
+                            color: _isFulfilled ? Colors.black : KouMingTheme.text,
                             fontStyle: FontStyle.italic,
                           ),
                         ),
@@ -860,10 +1086,10 @@ class _WishBubble extends StatelessWidget {
                       if (totalLights > 0) ...[
                         const SizedBox(height: 2),
                         Text(
-                          '\u{1F3EE} $totalLights',
+                          '\u{1F48C} $totalLights',
                           style: TextStyle(
-                            fontSize: _size > 70 ? 9 : 7,
-                            color: KouMingTheme.lantern,
+                            fontSize: _blessingSize > 70 ? 9 : 7,
+                            color: _isFulfilled ? Colors.black54 : KouMingTheme.lantern,
                           ),
                         ),
                       ],
@@ -874,6 +1100,74 @@ class _WishBubble extends StatelessWidget {
             ),
           );
         },
+      ),
+    );
+  }
+
+  void _showBlessings(BuildContext context) {
+    final blessings = wish.blessings;
+    if (blessings.isEmpty && wish.fulfillText == null) return;
+    
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: KouMingTheme.surface,
+        title: const Text('祝福与还愿', style: TextStyle(color: KouMingTheme.gold, fontFamily: 'MaShanZheng')),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              if (wish.fulfillText != null && wish.fulfillText!.isNotEmpty) ...[
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: KouMingTheme.gold.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: KouMingTheme.gold.withValues(alpha: 0.3)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('还愿文字', style: TextStyle(fontSize: 11, color: KouMingTheme.gold, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 6),
+                      Text(
+                        wish.fulfillText!,
+                        style: const TextStyle(color: KouMingTheme.text, fontSize: 13, height: 1.4),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              if (blessings.isNotEmpty) ...[
+                const Text('收到的祝福', style: TextStyle(fontSize: 11, color: KouMingTheme.dim, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 8),
+                ...blessings.map((b) => Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: KouMingTheme.deep.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: KouMingTheme.gold.withValues(alpha: 0.1)),
+                  ),
+                  child: Text(
+                    b,
+                    style: const TextStyle(color: KouMingTheme.text, fontSize: 13, height: 1.4),
+                  ),
+                )),
+              ],
+              if (blessings.isEmpty && wish.fulfillText == null)
+                const Text('还没有祝福或还愿文字', style: TextStyle(color: KouMingTheme.dim)),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('关闭', style: TextStyle(color: KouMingTheme.gold)),
+          ),
+        ],
       ),
     );
   }

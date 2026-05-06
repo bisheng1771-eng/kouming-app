@@ -8,11 +8,19 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import com.alipay.sdk.app.PayTask
+import java.security.KeyFactory
+import java.security.PrivateKey
+import java.security.Signature
+import java.security.spec.PKCS8EncodedKeySpec
+import java.util.Base64
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.kouming/alipay"
     private var pendingResult: MethodChannel.Result? = null
     private val handler = Handler(Looper.getMainLooper())
+
+    // 支付宝 APP 支付服务
+    private val ALIPAY_CHANNEL = "com.kouming/alipay"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -23,6 +31,16 @@ class MainActivity : FlutterActivity() {
                     val orderStr = call.argument<String>("orderStr")
                     if (orderStr == null) {
                         Log.e("AlipayPlugin", "orderStr is null!")
+                        result.error("INVALID_PARAM", "orderStr is null", null)
+                        return@setMethodCallHandler
+                    }
+                    pendingResult = result
+                    pay(orderStr)
+                }
+                "payWithSign" -> {
+                    // 新方法：Flutter 传 orderStr（含 sign），直接调起支付
+                    val orderStr = call.argument<String>("orderStr")
+                    if (orderStr == null) {
                         result.error("INVALID_PARAM", "orderStr is null", null)
                         return@setMethodCallHandler
                     }
@@ -44,12 +62,10 @@ class MainActivity : FlutterActivity() {
                 Log.d("AlipayPlugin", "payV2 result: $resultMap")
 
                 handler.post {
-                    // 直接把完整的 resultMap 回调给 Flutter，不走 intent 解析
                     val resultToFlutter = mapOf(
                         "resultStatus" to (resultMap["resultStatus"] ?: ""),
                         "result" to (resultMap["result"] ?: ""),
                         "memo" to (resultMap["memo"] ?: ""),
-                        // 调试用：打印完整原始 map
                         "_rawResultStatus" to resultMap["resultStatus"].toString()
                     )
                     Log.d("AlipayPlugin", "Sending to Flutter: $resultToFlutter")
@@ -66,8 +82,6 @@ class MainActivity : FlutterActivity() {
         }.start()
     }
 
-    // 支付宝返回时，如果设置了 result，会通过 intent 回调
-    // 但 payV2 已经通过 pendingResult 直接返回了，这个只做备用
     override fun onResume() {
         super.onResume()
         val resultStr = intent.getStringExtra("payResult")

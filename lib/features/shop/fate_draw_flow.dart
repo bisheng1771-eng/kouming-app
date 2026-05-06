@@ -4,15 +4,19 @@ import 'package:kouming/shared/theme/kouming_theme.dart';
 import 'package:kouming/shared/models/kouming_models.dart';
 import 'package:kouming/services/i18n_service.dart';
 import 'package:kouming/services/ai_service.dart';
+import 'package:kouming/services/alipay_service.dart';
+import 'package:kouming/services/supabase_service.dart';
 
 class FateDrawFlow extends StatefulWidget {
   final VoidCallback onDrawComplete;
   final VoidCallback onPaymentRequired;
   final String? wishText; // 用户当前愿望，用于AI个性化解读
-  const FateDrawFlow({super.key, required this.onDrawComplete, required this.onPaymentRequired, this.wishText});
-  static Future<void> show(BuildContext context, {required VoidCallback onDrawComplete, required VoidCallback onPaymentRequired, String? wishText}) {
+  final bool freeAvailable; // 是否有免费次数
+  final VoidCallback? onFreeUsed; // 使用免费次数时的回调
+  const FateDrawFlow({super.key, required this.onDrawComplete, required this.onPaymentRequired, this.wishText, this.freeAvailable = false, this.onFreeUsed});
+  static Future<void> show(BuildContext context, {required VoidCallback onDrawComplete, required VoidCallback onPaymentRequired, String? wishText, bool freeAvailable = false, VoidCallback? onFreeUsed}) {
     return showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
-      builder: (_) => FateDrawFlow(onDrawComplete: onDrawComplete, onPaymentRequired: onPaymentRequired, wishText: wishText));
+      builder: (_) => FateDrawFlow(onDrawComplete: onDrawComplete, onPaymentRequired: onPaymentRequired, wishText: wishText, freeAvailable: freeAvailable, onFreeUsed: onFreeUsed));
   }
   @override State<FateDrawFlow> createState() => _FateDrawFlowState();
 }
@@ -22,6 +26,7 @@ class _FateDrawFlowState extends State<FateDrawFlow> with TickerProviderStateMix
   _Phase _phase = _Phase.idle;
   FortuneSlip? _result;
   bool _isGenerating = false;
+  bool _isPaying = false;
   String? _aiReading;
 
   @override
@@ -36,6 +41,15 @@ class _FateDrawFlowState extends State<FateDrawFlow> with TickerProviderStateMix
         _flipCtrl.forward();
       }
     });
+    // 免费/已付费：自动开始抽签，不显示祈福按钮
+    if (widget.freeAvailable) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          widget.onFreeUsed?.call();
+          _startDraw();
+        }
+      });
+    }
   }
 
   @override
@@ -61,7 +75,125 @@ class _FateDrawFlowState extends State<FateDrawFlow> with TickerProviderStateMix
     return _fortunePool[level]![rng.nextInt(_fortunePool[level]!.length)];
   }
 
-  void _startDraw() async {
+  /// 点击抽签按钮 - 免费/已付费直接抽，否则走支付
+  void _onDrawButtonPressed() async {
+    print('[FateDrawFlow] Button pressed!');
+    
+    if (_isPaying) {
+      print('[FateDrawFlow] Already paying, ignoring');
+      return;
+    }
+    
+    // 免费/已付费模式：直接开始抽签
+    if (widget.freeAvailable) {
+      widget.onFreeUsed?.call();
+      _startDraw();
+      return;
+    }
+    
+    // 付费模式：显示支付确认对话框
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: KouMingTheme.surface,
+        title: Text('确认支付', style: TextStyle(color: KouMingTheme.gold, fontFamily: 'MaShanZheng')),
+        content: Text('即将支付 ¥6.00 抽取天命签', style: TextStyle(color: KouMingTheme.text)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('取消', style: TextStyle(color: KouMingTheme.dim)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('确认支付', style: TextStyle(color: KouMingTheme.gold)),
+          ),
+        ],
+      ),
+    );
+    
+    if (confirmed != true) {
+      print('[FateDrawFlow] User cancelled dialog');
+      return;
+    }
+    
+    setState(() => _isPaying = true);
+    
+    try {
+      // 获取用户ID（确保已登录）
+      final supabase = SupabaseService();
+      await supabase.ensureLogin();
+      final userId = supabase.userId ?? 'anonymous';
+      
+      print('[FateDrawFlow] Calling AlipayService.pay...');
+      
+      // 调用支付宝支付
+      final result = await AlipayService.pay(
+        product: 'fate',
+        userId: userId,
+      );
+      
+      print('[FateDrawFlow] Payment result: $result');
+      
+      if (result == 'success') {
+        // 支付成功，开始抽签
+        _startDraw();
+      } else if (result == 'canceled') {
+        // 用户取消
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('支付已取消'),
+              backgroundColor: KouMingTheme.purple,
+            ),
+          );
+        }
+      } else {
+        // 支付失败
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('支付失败，请重试'),
+              backgroundColor: KouMingTheme.purple,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print('[FateDrawFlow] Payment error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('支付出错: $e'),
+            backgroundColor: KouMingTheme.purple,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isPaying = false);
+      }
+    }
+  }
+
+  void _showLimitReachedDialog(String title, String message) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: KouMingTheme.surface,
+        title: Text(title, style: const TextStyle(color: KouMingTheme.gold, fontFamily: 'MaShanZheng')),
+        content: Text(message, style: const TextStyle(color: KouMingTheme.text)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('知道了', style: TextStyle(color: KouMingTheme.gold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _startDraw() {
     _result = _drawFortune();
     setState(() => _phase = _Phase.shaking);
     
@@ -78,17 +210,18 @@ class _FateDrawFlowState extends State<FateDrawFlow> with TickerProviderStateMix
     setState(() => _isGenerating = true);
     try {
       final aiService = AiService();
-      // 使用用户实际愿望内容生成个性化解读
-      final wishContent = widget.wishText ?? '天命签祈福';
-      final reading = await aiService.generateReading(
-        wishContent,
-        'default',
+      // 使用抽中的签名标题生成个性化指引
+      final fortuneTitle = _result?.title ?? '天命签';
+      final guidance = await aiService.generateFortuneGuidance(
+        fortuneTitle,
+        widget.wishText,
       );
       setState(() {
-        _aiReading = reading.body;
+        _aiReading = guidance;
         _isGenerating = false;
       });
     } catch (e) {
+      print('[FateDrawFlow] AI指引生成失败: $e');
       setState(() => _isGenerating = false);
     }
   }
@@ -159,16 +292,27 @@ class _FateDrawFlowState extends State<FateDrawFlow> with TickerProviderStateMix
         Text(I18n.t('fate_shake_hint'), style: const TextStyle(fontSize: 13, color: KouMingTheme.dim)),
         const SizedBox(height: 16),
         GestureDetector(
-          onTap: _startDraw,
+          onTap: _isPaying ? null : _onDrawButtonPressed,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
             decoration: BoxDecoration(
-              gradient: const LinearGradient(colors: [KouMingTheme.gold, KouMingTheme.warm]),
+              gradient: _isPaying 
+                ? const LinearGradient(colors: [Color(0xFF444466), Color(0xFF444466)])
+                : const LinearGradient(colors: [KouMingTheme.gold, KouMingTheme.warm]),
               borderRadius: BorderRadius.circular(24),
               boxShadow: [BoxShadow(color: KouMingTheme.gold.withValues(alpha: 0.3), blurRadius: 12)],
             ),
-            child: Text(I18n.t('fate_draw_btn'),
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
+            child: _isPaying
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  ),
+                )
+              : Text(I18n.t('fate_draw_btn'),
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1A1A2E))),
           ),
         ),
       ]),

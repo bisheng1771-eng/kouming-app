@@ -18,6 +18,39 @@ class ShareService {
         '${I18n.t('pool_share_card_download')}';
   }
 
+  /// Generate language-specific share text
+  static String generateLocalizedShareText(String wishText, String platform) {
+    const downloadLink = 'https://kouming.app/download';
+    switch (platform) {
+      case 'WeChat':
+        return '我在叩命许了一个愿望\n'
+            '「$wishText」\n'
+            '来为我祝福吧！也来许下你自己的愿望——\n'
+            '当更多人一起想，愿望就更有可能实现。\n'
+            '下载叩命APP，一起许愿 → $downloadLink';
+      case 'WhatsApp':
+        return 'I made a wish on KouMing\n'
+            '「$wishText」\n'
+            'Come bless my wish! Make your own wish too —\n'
+            'When more people think together, wishes come true.\n'
+            'Download KouMing APP → $downloadLink';
+      case 'LINE':
+        return 'KouMingで願い事をしました\n'
+            '「$wishText」\n'
+            '祝福してください！あなたも願い事を——\n'
+            'みんなで想えば、願いは叶う。\n'
+            'KouMingアプリをダウンロード → $downloadLink';
+      case 'KakaoTalk':
+        return 'KouMing에서 소원을 빌었어요\n'
+            '「$wishText」\n'
+            '축복해주세요! 당신도 소원을 빌어보세요——\n'
+            '함께 생각하면 소원은 이루어집니다.\n'
+            'KouMing 앱 다운로드 → $downloadLink';
+      default:
+        return generateShareText(wishText);
+    }
+  }
+
   /// Show the share bottom sheet
   static Future<void> showShareSheet(BuildContext context, {required String wishText}) async {
     final shareText = generateShareText(wishText);
@@ -135,43 +168,38 @@ class _ShareSheetContent extends StatelessWidget {
           ),
           const SizedBox(height: 20),
 
-          // Share buttons — wrap for 5 items
+          // Share buttons — 4 items centered
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Wrap(
-              alignment: WrapAlignment.spaceEvenly,
-              spacing: 12,
-              runSpacing: 12,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 _ShareButton(
                   emoji: '💬',
                   label: I18n.t('pool_share_wechat'),
                   color: const Color(0xFF07C160),
-                  onTap: () => _copyAndGuide(context, 'WeChat'),
+                  onTap: () => _shareWithImage(context, 'WeChat', wishText),
                 ),
+                const SizedBox(width: 16),
                 _ShareButton(
                   emoji: '📱',
                   label: I18n.t('pool_share_whatsapp'),
                   color: const Color(0xFF25D366),
-                  onTap: () => _copyAndGuide(context, 'WhatsApp'),
+                  onTap: () => _shareWithImage(context, 'WhatsApp', wishText),
                 ),
+                const SizedBox(width: 16),
                 _ShareButton(
                   emoji: '💚',
                   label: I18n.t('pool_share_line'),
                   color: const Color(0xFF06C755),
-                  onTap: () => _copyAndGuide(context, 'LINE'),
+                  onTap: () => _shareWithImage(context, 'LINE', wishText),
                 ),
+                const SizedBox(width: 16),
                 _ShareButton(
                   emoji: '💛',
                   label: I18n.t('pool_share_kakao'),
                   color: const Color(0xFFFAE100),
-                  onTap: () => _copyAndGuide(context, 'KakaoTalk'),
-                ),
-                _ShareButton(
-                  emoji: '📋',
-                  label: I18n.t('pool_share_copy'),
-                  color: KouMingTheme.gold,
-                  onTap: () => _copyOnly(context),
+                  onTap: () => _shareWithImage(context, 'KakaoTalk', wishText),
                 ),
               ],
             ),
@@ -182,28 +210,148 @@ class _ShareSheetContent extends StatelessWidget {
     );
   }
 
-  void _copyAndGuide(BuildContext context, String platform) {
-    Clipboard.setData(ClipboardData(text: shareText));
+  void _shareWithImage(BuildContext context, String platform, String wishText) {
+    final localizedText = ShareService.generateLocalizedShareText(wishText, platform);
+    Clipboard.setData(ClipboardData(text: localizedText));
     Navigator.pop(context);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          I18n.t('pool_share_copied', args: {'platform': platform}),
+    
+    // Show image preview dialog
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: KouMingTheme.surface,
+        title: Text('$platform 分享卡片', style: const TextStyle(color: KouMingTheme.gold, fontFamily: 'MaShanZheng')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    KouMingTheme.gold.withValues(alpha: 0.15),
+                    KouMingTheme.purple.withValues(alpha: 0.1),
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: KouMingTheme.gold.withValues(alpha: 0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Text('\u{1F30A}', style: TextStyle(fontSize: 20)),
+                      const SizedBox(width: 8),
+                      Text(
+                        platform == 'WeChat' ? '叩命' : 'KouMing',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: KouMingTheme.gold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    localizedText,
+                    style: const TextStyle(fontSize: 12, color: KouMingTheme.text, height: 1.5),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              '文案已复制到剪贴板\n请截图保存或长按粘贴到对应APP',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 11, color: KouMingTheme.dim),
+            ),
+          ],
         ),
-        backgroundColor: KouMingTheme.gold,
-        duration: const Duration(seconds: 3),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('知道了', style: TextStyle(color: KouMingTheme.gold)),
+          ),
+        ],
       ),
     );
   }
 
-  void _copyOnly(BuildContext context) {
-    Clipboard.setData(ClipboardData(text: shareText));
+  void _downloadImage(BuildContext context, String wishText) {
+    // 由于Flutter直接保存图片到相册需要平台特定代码，
+    // 这里先显示一个提示，让用户截图保存
     Navigator.pop(context);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(I18n.t('pool_share_copied_generic')),
-        backgroundColor: KouMingTheme.gold,
-        duration: const Duration(seconds: 2),
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: KouMingTheme.surface,
+        title: const Text('保存分享图片', style: TextStyle(color: KouMingTheme.gold, fontFamily: 'MaShanZheng')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    KouMingTheme.gold.withValues(alpha: 0.15),
+                    KouMingTheme.purple.withValues(alpha: 0.1),
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: KouMingTheme.gold.withValues(alpha: 0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Text('\u{1F30A}', style: TextStyle(fontSize: 20)),
+                      SizedBox(width: 8),
+                      Text(
+                        '叩命 KouMing',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: KouMingTheme.gold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    '「$wishText」',
+                    style: const TextStyle(fontSize: 14, color: KouMingTheme.text, height: 1.5, fontStyle: FontStyle.italic),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '来为我祝福吧！下载叩命APP，一起许愿',
+                    style: TextStyle(fontSize: 11, color: KouMingTheme.dim),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'https://kouming.app/download',
+                    style: TextStyle(fontSize: 10, color: KouMingTheme.water, decoration: TextDecoration.underline),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              '请截图保存此图片\n然后分享到您想要的平台',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 11, color: KouMingTheme.dim),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('知道了', style: TextStyle(color: KouMingTheme.gold)),
+          ),
+        ],
       ),
     );
   }

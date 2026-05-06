@@ -34,18 +34,32 @@ class SmartFisher {
   FishResult fish({
     required List<Wish> pool,
     required List<Wish> userWishes,
+    Set<String>? excludeIds,
   }) {
     if (pool.isEmpty) {
       throw StateError('Pool is empty — nothing to fish');
     }
 
+    // 过滤掉已捞过的愿望
+    var availablePool = pool;
+    if (excludeIds != null && excludeIds.isNotEmpty) {
+      availablePool = pool.where((w) => !excludeIds.contains(w.id)).toList();
+      // 如果全部捞过了，重置并重新使用所有愿望
+      if (availablePool.isEmpty) {
+        availablePool = pool;
+      }
+    }
+
+    // 随机打乱池子顺序，确保每次捞取不同
+    final shuffled = List<Wish>.from(availablePool)..shuffle(_rng);
+    
     final isSemantic = _rng.nextDouble() < 0.7;
 
     if (isSemantic && userWishes.isNotEmpty) {
-      return _semanticMatch(pool, userWishes);
+      return _semanticMatch(shuffled, userWishes);
     }
 
-    final wish = pool[_rng.nextInt(pool.length)];
+    final wish = shuffled[_rng.nextInt(shuffled.length)];
     return FishResult(
       wish: wish,
       matchType: FishMatchType.surprise,
@@ -59,8 +73,8 @@ class SmartFisher {
     final sameCategory =
         pool.where((w) => userCats.contains(w.category)).toList();
     if (sameCategory.isNotEmpty) {
-      sameCategory.sort((a, b) => b.lights.compareTo(a.lights));
-      final wish = sameCategory.first;
+      // 从同类愿望中随机选一个，而不是总是选第一个
+      final wish = sameCategory[_rng.nextInt(sameCategory.length)];
       return FishResult(
         wish: wish,
         matchType: FishMatchType.semantic,
@@ -243,25 +257,117 @@ class _FishingOverlayState extends State<FishingOverlay>
 
 // ─── Fished Wish Bottom Sheet ──────────────────────────────
 
-class FishedWishSheet extends StatelessWidget {
+class FishedWishSheet extends StatefulWidget {
   final FishResult result;
-  final bool isLit;
-  final VoidCallback onLight;
+  final VoidCallback? onBlessingComplete;
+  final void Function(String blessingText)? onBlessingText; // 返回祝福文字
 
   const FishedWishSheet({
     super.key,
     required this.result,
-    required this.isLit,
-    required this.onLight,
+    this.onBlessingComplete,
+    this.onBlessingText,
   });
 
   @override
+  State<FishedWishSheet> createState() => _FishedWishSheetState();
+}
+
+class _FishedWishSheetState extends State<FishedWishSheet> {
+  bool _hasBlessed = false;
+  final List<Map<String, String>> _blessings = [
+    {'nickname': '小星星', 'text': '愿你心想事成，前程似锦！'},
+    {'nickname': '追梦人', 'text': '加油！相信你一定可以实现！'},
+    {'nickname': '月光', 'text': '祝福你，愿一切安好。'},
+  ];
+
+  Future<void> _showBlessingDialog() async {
+    final controller = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: KouMingTheme.surface,
+        title: const Text('写下你的祝福', style: TextStyle(color: KouMingTheme.text, fontFamily: 'MaShanZheng')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              '为这份心愿写下真诚的祝福（至少10字）',
+              style: TextStyle(fontSize: 11, color: KouMingTheme.dim),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              style: const TextStyle(color: KouMingTheme.text),
+              decoration: InputDecoration(
+                hintText: '例如：愿你心想事成，一切顺利！',
+                hintStyle: const TextStyle(color: KouMingTheme.dim),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: KouMingTheme.dim),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: KouMingTheme.dim.withValues(alpha: 0.3)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: KouMingTheme.gold),
+                ),
+              ),
+              maxLines: 3,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消', style: TextStyle(color: KouMingTheme.dim)),
+          ),
+          TextButton(
+            onPressed: () {
+              final text = controller.text.trim();
+              if (text.length >= 10) {
+                Navigator.pop(ctx, true);
+              } else {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(
+                    content: Text('祝福需要至少10个字哦'),
+                    backgroundColor: KouMingTheme.purple,
+                  ),
+                );
+              }
+            },
+            child: const Text('发送祝福', style: TextStyle(color: KouMingTheme.gold)),
+          ),
+        ],
+      ),
+    );
+    
+    if (confirmed == true && mounted) {
+      final blessingText = controller.text.trim();
+      setState(() {
+        _hasBlessed = true;
+        // 将新祝福添加到列表最前面
+        _blessings.insert(0, {
+          'nickname': '我',
+          'text': blessingText,
+        });
+      });
+      widget.onBlessingComplete?.call();
+      widget.onBlessingText?.call(blessingText);
+      // 不自动关闭弹窗，让用户看到新祝福后手动点击空白处关闭
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final wish = result.wish;
+    final wish = widget.result.wish;
     final cat = WishCategory.values.firstWhere(
       (c) => c.key == wish.category,
       orElse: () => WishCategory.other,
     );
+    final result = widget.result;
 
     return Container(
       decoration: const BoxDecoration(
@@ -292,12 +398,12 @@ class FishedWishSheet extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: result.matchType == FishMatchType.semantic
+                  color: widget.result.matchType == FishMatchType.semantic
                       ? KouMingTheme.water.withValues(alpha: 0.12)
                       : KouMingTheme.gold.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: result.matchType == FishMatchType.semantic
+                    color: widget.result.matchType == FishMatchType.semantic
                         ? KouMingTheme.water.withValues(alpha: 0.25)
                         : KouMingTheme.gold.withValues(alpha: 0.25),
                   ),
@@ -306,18 +412,18 @@ class FishedWishSheet extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      result.matchType == FishMatchType.semantic ? '\u{1F517}' : '\u{1F3B2}',
+                      widget.result.matchType == FishMatchType.semantic ? '\u{1F517}' : '\u{1F3B2}',
                       style: const TextStyle(fontSize: 12),
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      result.matchType == FishMatchType.semantic
-                          ? I18n.t('pool_fish_label')
+                      widget.result.matchType == FishMatchType.semantic
+                          ? '祝福'
                           : '\u{1F3B2}',
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
-                        color: result.matchType == FishMatchType.semantic
+                        color: widget.result.matchType == FishMatchType.semantic
                             ? KouMingTheme.water
                             : KouMingTheme.gold,
                       ),
@@ -333,7 +439,7 @@ class FishedWishSheet extends StatelessWidget {
 
           // Meaning (psychology principle)
           Text(
-            result.matchReason,
+            widget.result.matchReason,
             style: TextStyle(
               fontSize: 10,
               fontStyle: FontStyle.italic,
@@ -354,50 +460,117 @@ class FishedWishSheet extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            I18n.t('pool_lantern_count', args: {'count': '${wish.lights}'}),
+            '${wish.lights} 条祝福',
             style: const TextStyle(fontSize: 11, color: KouMingTheme.lantern),
+          ),
+          const SizedBox(height: 12),
+          
+          // 祝福列表
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: KouMingTheme.surface.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: KouMingTheme.gold.withValues(alpha: 0.1)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '最新祝福 (${_blessings.length})',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: KouMingTheme.gold.withValues(alpha: 0.8),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ..._blessings.asMap().entries.map((entry) {
+                  final index = entry.key;
+                  final blessing = entry.value;
+                  return Padding(
+                    padding: EdgeInsets.only(bottom: index < _blessings.length - 1 ? 6 : 0),
+                    child: _buildBlessingItem(blessing['nickname']!, blessing['text']!),
+                  );
+                }).toList(),
+              ],
+            ),
           ),
           const SizedBox(height: 20),
 
-          // Light + Share buttons
-          Row(
+          // Blessing button only
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _hasBlessed ? null : _showBlessingDialog,
+              icon: const Text('\u{1F48C}', style: TextStyle(fontSize: 14)),
+              label: Text(
+                _hasBlessed ? '已祝福' : '写祝福',
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: KouMingTheme.lantern,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: KouMingTheme.lantern.withValues(alpha: 0.3),
+                disabledForegroundColor: Colors.white54,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildBlessingItem(String nickname, String text) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 24,
+          height: 24,
+          decoration: BoxDecoration(
+            color: KouMingTheme.gold.withValues(alpha: 0.15),
+            shape: BoxShape.circle,
+          ),
+          child: Center(
+            child: Text(
+              nickname[0],
+              style: const TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                color: KouMingTheme.gold,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Share button
-              OutlinedButton.icon(
-                onPressed: () => ShareService.showShareSheet(context, wishText: wish.text),
-                icon: const Text('\u{1F4E4}', style: TextStyle(fontSize: 12)),
-                label: Text(I18n.t('pool_share_label'), style: const TextStyle(fontSize: 11)),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: KouMingTheme.gold,
-                  side: BorderSide(color: KouMingTheme.gold.withValues(alpha: 0.2)),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+              Text(
+                nickname,
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: KouMingTheme.text,
                 ),
               ),
-              const SizedBox(width: 10),
-              // Light button
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: isLit ? null : onLight,
-                  icon: const Text('\u{1F3EE}', style: TextStyle(fontSize: 16)),
-                  label: Text(
-                    isLit ? I18n.t('pool_lit') : I18n.t('pool_light_btn'),
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: KouMingTheme.lantern,
-                    foregroundColor: Colors.white,
-                    disabledBackgroundColor: KouMingTheme.lantern.withValues(alpha: 0.3),
-                    disabledForegroundColor: Colors.white54,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
+              const SizedBox(height: 2),
+              Text(
+                text,
+                style: TextStyle(
+                  fontSize: 9,
+                  color: KouMingTheme.dim.withValues(alpha: 0.8),
+                  height: 1.3,
                 ),
               ),
             ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

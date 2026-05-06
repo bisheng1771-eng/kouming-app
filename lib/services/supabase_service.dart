@@ -15,9 +15,14 @@ class SupabaseService {
 
   /// 初始化 Supabase
   static Future<void> init() async {
+    const supabaseUrl = String.fromEnvironment('SUPABASE_URL', 
+      defaultValue: 'https://ibffrwevphkkbcfgaift.supabase.co');
+    const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY',
+      defaultValue: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImliZmZyd2V2cGhra2JjZmdhaWZ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxMDI3MTEsImV4cCI6MjA5MjY3ODcxMX0.hWJw5bnMTYfnox2BAk4_0DFDmMi-b2H4mTemZSwWwEA');
+    
     await Supabase.initialize(
-      url: 'https://ibffrwevphkkbcfgaift.supabase.co',
-      anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImliZmZyd2V2cGhra2JjZmdhaWZ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxMDI3MTEsImV4cCI6MjA5MjY3ODcxMX0.hWJw5bnMTYfnox2BAk4_0DFDmMi-b2H4mTemZSwWwEA',
+      url: supabaseUrl,
+      anonKey: supabaseAnonKey,
     );
     debugPrint('[Supabase] Initialized ✅');
   }
