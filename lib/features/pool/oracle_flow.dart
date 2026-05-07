@@ -157,46 +157,30 @@ class _OracleSheetState extends State<_OracleSheet>
   }
 
   Future<void> _payForOracle() async {
+    // 跳过支付宝，直接展示算卦结果
     setState(() => _phase = _Phase.casting);
     _mistCtrl.repeat(reverse: true);
 
+    // 收集点击
+    final supabase = SupabaseService();
+    await supabase.ensureLogin();
+    await supabase.createClick(
+      buttonName: '算卦',
+      nickname: supabase.userId ?? 'anonymous',
+    );
+
     try {
-      // 获取用户ID（确保已登录）
-      final supabase = SupabaseService();
-      await supabase.ensureLogin();
-      final userId = supabase.userId ?? 'anonymous';
-
-      // 调用支付宝支付
-      final result = await AlipayService.pay(
-        product: 'oracle',
-        userId: userId,
+      final reading = await widget.aiService.generateReading(
+        widget.wish.text,
+        widget.wish.category,
       );
-
-      if (result == 'success') {
-        // 支付成功，进行算卦
-        final reading = await widget.aiService.generateReading(
-          widget.wish.text,
-          widget.wish.category,
-        );
-        if (!mounted) return;
-        _mistCtrl.stop();
-        _hexFlipCtrl.forward(from: 0);
-        setState(() {
-          _reading = reading;
-          _phase = _Phase.result;
-        });
-      } else if (result == 'canceled') {
-        if (!mounted) return;
-        _mistCtrl.stop();
-        setState(() => _phase = _Phase.greet);
-      } else {
-        if (!mounted) return;
-        _mistCtrl.stop();
-        setState(() {
-          _errorMessage = '支付失败，请重试';
-          _phase = _Phase.error;
-        });
-      }
+      if (!mounted) return;
+      _mistCtrl.stop();
+      _hexFlipCtrl.forward(from: 0);
+      setState(() {
+        _reading = reading;
+        _phase = _Phase.result;
+      });
     } catch (e) {
       if (!mounted) return;
       _mistCtrl.stop();

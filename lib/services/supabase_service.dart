@@ -198,6 +198,24 @@ class SupabaseService {
   // 支付记录 (payments)
   // ============================================================
 
+  /// 创建点击记录
+  Future<void> createClick({
+    required String buttonName,
+    String? nickname,
+  }) async {
+    try {
+      await _client.from('clicks').insert({
+        'user_id': userId ?? 'anonymous',
+        'button_name': buttonName,
+        'nickname': nickname ?? '匿名用户',
+        'clicked_at': DateTime.now().toIso8601String(),
+      });
+      debugPrint('[Supabase] Click recorded: $buttonName');
+    } catch (e) {
+      debugPrint('[Supabase] Create click failed: $e');
+    }
+  }
+
   /// 创建支付记录
   Future<void> createPayment({
     required String productType,

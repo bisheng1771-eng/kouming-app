@@ -144,6 +144,14 @@ class _OfferingShopState extends State<OfferingShop>
   Future<void> _onPurchase(_ShopOffering offering) async {
     if (_animatingOffering != null) return;
 
+    // 记录点击
+    final supabase = SupabaseService();
+    await supabase.ensureLogin();
+    await supabase.createClick(
+      buttonName: offering.nameKey,
+      nickname: widget.state.nickname,
+    );
+
     // 检查登录状态
     if (widget.requireLogin != null) {
       final loggedIn = await widget.requireLogin!();
@@ -159,8 +167,6 @@ class _OfferingShopState extends State<OfferingShop>
     setState(() => _animatingOffering = offering.nameKey);
     _purchaseCtrl.forward(from: 0);
 
-    final supabase = SupabaseService();
-    await supabase.ensureLogin();
     final userId = supabase.userId ?? 'anonymous';
 
     // Map every offering to a product type for payment
@@ -248,71 +254,19 @@ class _OfferingShopState extends State<OfferingShop>
       return;
     }
 
-    // --- 其他产品（供品/天命签）：走支付流程 ---
-    if (AlipayService.mockMode) {
-      // Mock模式：弹出模拟支付确认对话框，不会直接显示成功动画
-      final mockPaid = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: KouMingTheme.surface,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text('模拟支付', style: const TextStyle(color: KouMingTheme.gold, fontFamily: 'MaShanZheng')),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('当前为测试模式', style: const TextStyle(color: KouMingTheme.dim, fontSize: 12)),
-              const SizedBox(height: 12),
-              Text('即将支付 ¥${offering.priceYuan.toStringAsFixed(2)} 购买$productName',
-                  style: const TextStyle(color: KouMingTheme.text, fontSize: 15)),
-              const SizedBox(height: 16),
-              const Text('正式版将调起支付宝APP完成支付', style: TextStyle(color: KouMingTheme.dim, fontSize: 11)),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('取消', style: TextStyle(color: KouMingTheme.dim)),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('确认支付', style: TextStyle(color: KouMingTheme.gold)),
-            ),
-          ],
-        ),
-      );
+    // --- 跳过支付宝，直接展示付费成功动效 ---
+    // 展示成功提示 + 动效（无需真实支付）
+    _showPaySuccessAnimation(offering, productType);
+  }
 
-      if (mockPaid != true) {
-        setState(() => _animatingOffering = null);
-        return;
-      }
-    } else {
-      // 真实支付流程
-      final result = await AlipayService.pay(product: productType, userId: userId);
-
-      if (result != 'success') {
-        setState(() => _animatingOffering = null);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(result == 'canceled' ? '支付已取消' : '支付失败，请重试'),
-              backgroundColor: KouMingTheme.purple,
-            ),
-          );
-        }
-        return;
-      }
-    }
-
-    // Payment success — record to Supabase (fire-and-forget)
-    supabase.createPayment(productType: productType, amount: offering.priceYuan);
-
-    // Handle delivery per section
+  void _showPaySuccessAnimation(_ShopOffering offering, String productType) {
+    // 通知用户付费成功
     if (offering.section == _Section.fate) {
+      // 祈福签：直接展示抽签动画
       final recentWish = widget.state.myWishes.isNotEmpty ? widget.state.myWishes.first.text : null;
-      // 延迟清动画状态，等 FateDrawFlow 弹窗出现
       Future.delayed(const Duration(milliseconds: 500), () {
-        if (mounted) setState(() => _animatingOffering = null);
+        if (!mounted) return;
+        setState(() => _animatingOffering = null);
       });
       Future.delayed(const Duration(milliseconds: 400), () {
         if (!mounted) return;
@@ -321,20 +275,19 @@ class _OfferingShopState extends State<OfferingShop>
           onDrawComplete: () {},
           onPaymentRequired: () {},
           wishText: recentWish,
-          freeAvailable: true, // Already paid
-          onFreeUsed: () {}, // Payment handled above
+          freeAvailable: true,
+          onFreeUsed: () {},
         );
       });
       return;
     }
 
-    // Offerings (微光/花灯/长明灯) — add merit
+    // 三个法物（微光/花灯/长明灯）：显示功德增加动画
     if (offering.meritReward > 0) {
       _showMeritIncrease(offering.meritReward);
       widget.onStateChanged(widget.state.copyWith(meritPoints: widget.state.meritPoints + offering.meritReward));
     }
 
-    // 延迟清动画状态，等功德弹窗动画结束再清
     Future.delayed(const Duration(milliseconds: 500), () {
       if (mounted) setState(() => _animatingOffering = null);
     });

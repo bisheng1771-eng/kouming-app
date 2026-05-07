@@ -5,6 +5,7 @@ import 'package:kouming/shared/models/kouming_models.dart';
 import 'package:kouming/services/ai_service.dart';
 import 'package:kouming/services/i18n_service.dart';
 import 'package:kouming/services/share_service.dart';
+import 'package:kouming/services/supabase_service.dart';
 import 'package:kouming/features/pool/oracle_flow.dart';
 import 'package:kouming/features/pool/fishing_flow.dart';
 
@@ -812,7 +813,15 @@ class _PoolPageState extends State<PoolPage> with TickerProviderStateMixin {
             subtitle: I18n.t('pool_throw_hint'),
             meaning: I18n.t('pool_throw_meaning'),
             count: widget.state.throwLimit,
-            onTap: _throwWish,
+            onTap: () async {
+              final supabase = SupabaseService();
+              await supabase.ensureLogin();
+              await supabase.createClick(
+                buttonName: '许愿',
+                nickname: widget.state.nickname,
+              );
+              await _throwWish();
+            },
           ),
           const SizedBox(width: 6),
           _ActionButton(
@@ -821,7 +830,15 @@ class _PoolPageState extends State<PoolPage> with TickerProviderStateMixin {
             subtitle: I18n.t('pool_fish_hint'),
             meaning: I18n.t('pool_fish_meaning'),
             count: widget.state.fishLimit,
-            onTap: _startFishing,
+            onTap: () async {
+              final supabase = SupabaseService();
+              await supabase.ensureLogin();
+              await supabase.createClick(
+                buttonName: '捞愿',
+                nickname: widget.state.nickname,
+              );
+              await _startFishing();
+            },
           ),
         ],
       ),
