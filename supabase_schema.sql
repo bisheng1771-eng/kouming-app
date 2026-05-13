@@ -1,7 +1,8 @@
 -- ============================================================
 -- 叩命 (KouMing) Supabase 数据库 Schema
 -- 项目: ibffrwevphkkbcfgaift
--- 表结构设计 v1.0
+-- 表结构设计 v1.1
+-- 更新: 2026-05-14 补充显式 GRANT 语句（Supabase 10月30日起不再默认授权）
 -- ============================================================
 
 -- Enable UUID extension
@@ -48,6 +49,11 @@ create policy "Users can update own profile" on public.users
 create policy "Users can insert own profile" on public.users
   for insert with check (true);
 
+-- GRANT: Data API 访问权限
+GRANT SELECT, INSERT, UPDATE ON public.users TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.users TO authenticated;
+GRANT ALL ON public.users TO service_role;
+
 -- ============================================================
 -- 2. wishes — 愿望表
 -- ============================================================
@@ -72,6 +78,11 @@ create policy "Users can insert own wishes" on public.wishes
 create policy "Users can update own wishes" on public.wishes
   for update using (auth.uid() = user_id);
 
+-- GRANT: Data API 访问权限
+GRANT SELECT, INSERT ON public.wishes TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.wishes TO authenticated;
+GRANT ALL ON public.wishes TO service_role;
+
 -- ============================================================
 -- 3. lantern_records — 点灯记录表
 -- ============================================================
@@ -89,6 +100,11 @@ create policy "Anyone can view lantern records" on public.lantern_records
   for select using (true);
 create policy "Anyone can insert lantern records" on public.lantern_records
   for insert with check (true);
+
+-- GRANT: Data API 访问权限
+GRANT SELECT, INSERT ON public.lantern_records TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.lantern_records TO authenticated;
+GRANT ALL ON public.lantern_records TO service_role;
 
 -- ============================================================
 -- 4. fortune_slips — 卦象记录表
@@ -115,6 +131,11 @@ create policy "Anyone can view fortune slips" on public.fortune_slips
 create policy "Anyone can insert fortune slips" on public.fortune_slips
   for insert with check (true);
 
+-- GRANT: Data API 访问权限
+GRANT SELECT, INSERT ON public.fortune_slips TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.fortune_slips TO authenticated;
+GRANT ALL ON public.fortune_slips TO service_role;
+
 -- ============================================================
 -- 5. wish_capsules — 愿望胶囊表
 -- ============================================================
@@ -136,6 +157,11 @@ create policy "Anyone can view capsules" on public.wish_capsules
 create policy "Users can insert capsules" on public.wish_capsules
   for insert with check (true);
 
+-- GRANT: Data API 访问权限
+GRANT SELECT, INSERT ON public.wish_capsules TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.wish_capsules TO authenticated;
+GRANT ALL ON public.wish_capsules TO service_role;
+
 -- ============================================================
 -- 6. merit_logs — 功德日志（防刷）
 -- ============================================================
@@ -153,6 +179,11 @@ create policy "Users can view own merit logs" on public.merit_logs
   for select using (true);
 create policy "Anyone can insert merit logs" on public.merit_logs
   for insert with check (true);
+
+-- GRANT: Data API 访问权限
+GRANT SELECT, INSERT ON public.merit_logs TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.merit_logs TO authenticated;
+GRANT ALL ON public.merit_logs TO service_role;
 
 -- ============================================================
 -- 7. payments — 支付记录表
@@ -176,6 +207,11 @@ create policy "Users can view own payments" on public.payments
 create policy "Anyone can insert payments" on public.payments
   for insert with check (true);
 
+-- GRANT: Data API 访问权限
+GRANT SELECT, INSERT ON public.payments TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.payments TO authenticated;
+GRANT ALL ON public.payments TO service_role;
+
 -- ============================================================
 -- 8. global_stats — 全局统计（只读，供前台显示）
 -- ============================================================
@@ -190,6 +226,11 @@ create table if not exists public.global_stats (
 alter table public.global_stats enable row level security;
 create policy "Anyone can view global stats" on public.global_stats
   for select using (true);
+
+-- GRANT: Data API 访问权限（global_stats 为只读统计表）
+GRANT SELECT ON public.global_stats TO anon;
+GRANT SELECT ON public.global_stats TO authenticated;
+GRANT ALL ON public.global_stats TO service_role;
 
 -- 初始化全局统计
 insert into public.global_stats (id, total_wishes, total_lanterns, total_fulfillments)
